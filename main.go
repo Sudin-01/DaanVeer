@@ -3,8 +3,8 @@ package main
 import (
 	// "encoding/json"
 	"fmt"
-	"log"
-	// "github.com/Roshan310/DaanVeer/blockchain"
+	//"log"
+	"github.com/Roshan310/DaanVeer/blockchain"
 	"github.com/Roshan310/DaanVeer/wallet"
 )
 
@@ -15,13 +15,13 @@ import (
 // 	blockchain := blockchain.NewBlockchain()
 // 	blockchain.Print()
 
-// 	blockchain.AddTransaction("A", "B", 1.0)
-// 	blockchain.AddTransaction("C", "D", 2.0)
+// 	blockchain.AddTransaction([]byte("A"), []byte("B"), 1.0)
+// 	blockchain.AddTransaction([]byte("C"), []byte("D"), 2.0)
 // 	previousHash := blockchain.LastBlock().Hash()
 // 	blockchain.CreateBlock(previousHash)
 // 	blockchain.Print()
 
-// 	blockchain.AddTransaction("C", "D", 2.0)
+// 	blockchain.AddTransaction([]byte("C"), []byte("D"), 2.0)
 // 	previousHash = blockchain.LastBlock().Hash()
 // 	blockchain.CreateBlock(previousHash)
 // 	blockchain.Print()
@@ -54,35 +54,68 @@ import (
 //--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 // Test for Wallet
+// func main() {
+// 	// Specify the filename to save the wallet.
+// 	walletFile := "my_wallet.txt"
+
+// 	// Generate a new wallet and save it to the file.
+// 	myWallet, err := wallet.GenerateWallet(walletFile)
+// 	if err != nil {
+// 		log.Fatalf("Failed to generate wallet: %v\n", err)
+// 	}
+
+// 	// Display the newly generated wallet information.
+// 	fmt.Println("New Wallet:")
+// 	fmt.Println("Wallet Address:", myWallet.Address)
+// 	fmt.Printf("Public Key: %x\n", wallet.PublicKeyToBytes(myWallet.PublicKey))
+// 	fmt.Printf("Private Key: %x\n", myWallet.PrivateKey.D.Bytes())
+
+// 	// Load all wallets from the file.
+// 	wallets, err := wallet.LoadAllWallets(walletFile)
+// 	if err != nil {
+// 		log.Fatalf("Failed to load wallets: %v\n", err)
+// 	}
+
+// 	// Display all loaded wallets.
+// 	fmt.Println("\nLoaded Wallets:")
+// 	for i, w := range wallets {
+// 		fmt.Printf("Wallet %d:\n", i+1)
+// 		fmt.Println("Wallet Address:", w.Address)
+// 		fmt.Printf("Public Key: %x\n", wallet.PublicKeyToBytes(w.PublicKey))
+// 		fmt.Printf("Private Key: %x\n\n", w.PrivateKey.D.Bytes())
+// 	}
+// }
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 func main() {
-	// Specify the filename to save the wallet.
-	walletFile := "my_wallet.txt"
+	// Create blockchain with authorized authorities
+	authorities := []string{"authority1_address", "authority2_address"}
+	bc := blockchain.NewBlockchain(authorities)
 
-	// Generate a new wallet and save it to the file.
-	myWallet, err := wallet.GenerateWallet(walletFile)
+	// Generate wallets
+	wallet1, _ := wallet.GenerateWallet("wallets.txt")
+	wallet2, _ := wallet.GenerateWallet("wallets.txt")
+
+	// Fund wallet1 (initial balance)
+	bc.Balances[wallet1.Address] = 100
+
+	// Add transaction
+	err := bc.AddTransaction(wallet1.Address, wallet2.Address, 50, wallet1)
 	if err != nil {
-		log.Fatalf("Failed to generate wallet: %v\n", err)
+		fmt.Println(err)
+		return
 	}
 
-	// Display the newly generated wallet information.
-	fmt.Println("New Wallet:")
-	fmt.Println("Wallet Address:", myWallet.Address)
-	fmt.Printf("Public Key: %x\n", wallet.PublicKeyToBytes(myWallet.PublicKey))
-	fmt.Printf("Private Key: %x\n", myWallet.PrivateKey.D.Bytes())
-
-	// Load all wallets from the file.
-	wallets, err := wallet.LoadAllWallets(walletFile)
+	// Authority creates a block
+	err = bc.CreateBlock(authorities[0])
 	if err != nil {
-		log.Fatalf("Failed to load wallets: %v\n", err)
+		fmt.Println(err)
+		return
 	}
 
-	// Display all loaded wallets.
-	fmt.Println("\nLoaded Wallets:")
-	for i, w := range wallets {
-		fmt.Printf("Wallet %d:\n", i+1)
-		fmt.Println("Wallet Address:", w.Address)
-		fmt.Printf("Public Key: %x\n", wallet.PublicKeyToBytes(w.PublicKey))
-		fmt.Printf("Private Key: %x\n\n", w.PrivateKey.D.Bytes())
-	}
+	// Print blockchain
+	bc.Print()
+
+	// Print balances
+	fmt.Println("Balances:", bc.Balances)
 }
 
