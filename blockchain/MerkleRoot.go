@@ -7,20 +7,12 @@ import (
 )
 
 
-type Transaction struct {
-	Data string
-}
-
-// Hash computes the SHA-256 hash of a transaction's data.
-// func (t *Transaction) Hash() []byte {
-// 	return sha256.Sum256([]byte(t.Data))
-// }
-
 // MerkleNode represents a node in the Merkle tree.
 type MerkleNode struct {
 	Left  *MerkleNode
 	Right *MerkleNode
 	Hash  []byte
+	Transaction Transactions
 }
 
 
@@ -41,7 +33,7 @@ type MerkleTree struct {
 }
 
 // NewMerkleNode creates a new Merkle node from two child nodes or a single transaction.
-func NewMerkleNode(left, right *MerkleNode, hash []byte) *MerkleNode {
+func NewMerkleNode(left, right *MerkleNode, hash []byte, tx Transactions) *MerkleNode {
 	var nodeHash []byte
 	if left == nil && right == nil {
 		nodeHash = hash
@@ -55,6 +47,7 @@ func NewMerkleNode(left, right *MerkleNode, hash []byte) *MerkleNode {
 		Left:  left,
 		Right: right,
 		Hash:  nodeHash,
+		Transaction: tx,
 	}
 }
 
@@ -68,7 +61,7 @@ func NewMerkleTree(transactions []Transactions) *MerkleTree {
 	var nodes []*MerkleNode
 	for _, tx := range transactions {
 		hash := tx.Hash()
-		nodes = append(nodes, NewMerkleNode(nil, nil, hash))
+		nodes = append(nodes, NewMerkleNode(nil, nil, hash, tx))
 	}
 
 	// Build the tree by iteratively hashing pairs of nodes.
@@ -79,7 +72,7 @@ func NewMerkleTree(transactions []Transactions) *MerkleTree {
 
 		var newLevel []*MerkleNode
 		for i := 0; i < len(nodes); i += 2 {
-			newNode := NewMerkleNode(nodes[i], nodes[i+1], []byte{})
+			newNode := NewMerkleNode(nodes[i], nodes[i+1], []byte{}, transactions[i])
 			newLevel = append(newLevel, newNode)
 		}
 		nodes = newLevel
