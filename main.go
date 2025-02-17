@@ -47,7 +47,7 @@ func main() {
 	chain := blockchain.InitBlockChain()
 	wlt, err := wallet.GenerateWallet("my_wallet.txt")
 	blockchain.ShowError(err)
-	chain.PrintChain()
+	// chain.PrintChain()
 	fmt.Println("Starting server at port: ", api.PORT)
 	api.StartServer(wlt, chain, api.PORT)
 }
