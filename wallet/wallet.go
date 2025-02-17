@@ -15,9 +15,8 @@ import (
 	"os"
 	"strings"
 	"bytes"
-
-	"github.com/mr-tron/base58"
 	"golang.org/x/crypto/ripemd160"
+	"github.com/mr-tron/base58"
 )
 
 const (
@@ -69,7 +68,7 @@ func PublicKeyHashRipeMD160(pubKey *ecdsa.PublicKey) []byte {
 	pubKeyHash := sha256.Sum256(pubKeyBytes)
 	ripeMDHasher := ripemd160.New()
 	_, _ = ripeMDHasher.Write(pubKeyHash[:])
-	return ripeMDHasher.Sum(nil)
+	return pubKeyHash[:]
 }
 
 func GenerateAddress(publicKey *ecdsa.PublicKey) string {
@@ -216,6 +215,15 @@ func LoadAllWallets(fileName string) ([]*Wallet, error) {
 }
 
 func GenerateWallet(filename string) (*Wallet, error) {
+
+	if _, err := os.Stat(filename); err == nil {
+		wallets, err := LoadAllWallets(filename)
+		if err == nil && len(wallets) > 0 {
+			fmt.Printf("Wallet already exists! Your address: %s\n", wallets[0].Address)
+			return wallets[0], nil 
+		}
+	}
+
 	wallet := &Wallet{}
 	if err := wallet.GenerateKeyPair(); err != nil {
 		return nil, err
@@ -243,3 +251,6 @@ func PubKeyFromAddress(address string) ([]byte, error) {
 	}
 	return nil, errors.New("this is not a valid address")
 }
+
+
+
