@@ -1,0 +1,106 @@
+body {
+    font-family: 'Roboto', sans-serif;
+    background: #f8f9fa;
+    margin: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    color: #333;
+}
+
+.actions h3 {
+    font-size: 20px;
+    font-weight: 500;
+    color: #222;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+form {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 20px;
+}
+
+.btn {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.3s ease;
+}
+
+.btn:hover {
+    background: #0056b3;
+}
+
+.txTable {
+    width: 100%;
+    max-width: 1200px;
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    overflow-x: auto;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table th, .table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.table th {
+    background: #f1f1f1;
+    font-weight: 500;
+}
+
+.table tr:hover {
+    background: #f9f9f9;
+}
+
+@media (max-width: 600px) {
+    .txTable {
+        padding: 15px;
+    }
+    .btn {
+        width: 100%;
+    }
+}
+
+
+#txSelect {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px; 
+    align-items: center; 
+    justify-content: flex-start; 
+    margin-bottom: 20px;
+}
+
+#txSelect input[type="checkbox"] {
+    margin: 0; /* Remove default margin */
+    width: 16px; /* Set a fixed width */
+    height: 16px; /* Set a fixed height */
+    cursor: pointer; /* Add pointer cursor */
+}
+
+#txSelect label {
+    margin: 0; /* Remove default margin */
+    font-size: 14px; /* Set font size */
+    cursor: pointer; /* Add pointer cursor */
+    display: flex; /* Use flexbox for alignment */
+    align-items: center; /* Align text vertically */
+    gap: 5px; /* Space between checkbox and label */
+}
