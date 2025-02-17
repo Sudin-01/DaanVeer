@@ -138,7 +138,7 @@ func PostNewTransaction(wlt *wallet.Wallet, chain *blockchain.BlockChain) gin.Ha
 			c.JSON(400, ErrorJSON{ErrorMsg: fmt.Sprintf("%v", err)})
 			return
 		}
-		communication.MemoryPool[string(newTx.TxID)] = *newTx
+		// communication.MemoryPool[string(newTx.TxID)] = *newTx
 
 		for _, nodeAddress := range communication.KnownNodes {
 			communication.SendTx(nodeAddress, *newTx)
