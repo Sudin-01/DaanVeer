@@ -24,6 +24,9 @@ var Validators = map[string]Validator{}
 // var Validators = map[string]bool{}
 
 func (blk *Block) VerifyProof() bool {
+	
+	//Need to debug this quite hard
+	//This will only work if VerifyHash() (inside the block.go) works
 	return true
 	// fmt.Println("About to verify the proof of block")
 	// fmt.Println("    ")
