@@ -59,6 +59,7 @@ func NewMerkleTree(transactions []Transactions) *MerkleTree {
 
 	// Create leaf nodes.
 	var nodes []*MerkleNode
+	
 	for _, tx := range transactions {
 		hash := tx.Hash()
 		nodes = append(nodes, NewMerkleNode(nil, nil, hash, tx))
