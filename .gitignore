@@ -1,0 +1,6 @@
+# to remove already tracked files from git
+# git rm --cached my_wallet.txt
+
+my_wallet.txt
+test.txt
+db
