@@ -1,0 +1,143 @@
+html {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Roboto', sans-serif;
+    background: #f9fafb;
+    color: #1e1e1e;
+    min-height: 100vh;
+}
+
+.actions {
+    margin-top: auto;
+    text-align: center;
+}
+
+.actions h2 {
+    display: inline-block;
+    padding: 15px 40px;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #1e1e1e;
+    font-size: 1.5rem;
+    font-weight: 700;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
+}
+
+.actions h2:hover {
+    background: #f6f6f6;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+}
+
+.txTable {
+    width: 100%;
+    max-width: 1200px;
+    margin: 20px auto;
+    padding: 20px;
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.txTable #secondTxTable {
+    margin-top: 20px;
+    width: 50%;
+}
+
+.table {
+    width: 100%;
+    margin-top: 20px;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+.table th a {
+    color: #5e84f7;
+    text-decoration: none;
+    font-size: 14px;
+    padding-left: 15px;
+    transition: all 0.3s ease;
+}
+
+.table th a:hover {
+    color: #4b80ff;
+    text-decoration: underline;
+}
+
+.table th a i {
+    position: absolute;
+    margin-left: -25px;
+    margin-top: -2px;
+}
+
+.table td,
+.table th {
+    text-align: left;
+    padding: 15px;
+    font-size: 14px !important;
+    font-weight: 500;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.table td {
+    font-weight: 400;
+    color: #1e1e1e;
+}
+
+.table td a {
+    color: #5e84f7;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.table td a:hover {
+    color: #4b80ff;
+    text-decoration: underline;
+}
+
+.table td span {
+    color: #939393;
+}
+
+.table td .hashLoader {
+    width: 250px;
+}
+
+.table tr:hover {
+    background: rgba(0, 0, 0, 0.02);
+    transition: all 0.3s ease;
+}
+
+.table .hidden {
+    display: none;
+}
+
+.table .expandFlex {
+    display: flex;
+    margin-bottom: 50px;
+}
+
+.table .expandFlex .fromHolder,
+.table .expandFlex .toHolder {
+    width: 48%;
+    padding: 10px;
+}
+
+.table .expandFlex .arrow {
+    text-align: center;
+    padding-top: 8px;
+    color: #5e84f7;
+}
+
+#pk {
+    word-wrap: break-word;
+    color: #5e84f7;
+}

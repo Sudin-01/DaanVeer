@@ -15,9 +15,8 @@ import (
 	"os"
 	"strings"
 	"bytes"
-
-	"github.com/mr-tron/base58"
 	"golang.org/x/crypto/ripemd160"
+	"github.com/mr-tron/base58"
 )
 
 const (
@@ -36,14 +35,13 @@ func (w *Wallet) GenerateKeyPair() error {
 	if err != nil {
 		return err
 	}
-
 	w.PrivateKey = privateKey
 	w.PublicKey = &privateKey.PublicKey
 	return nil
 }
 
-func PublicKeyToBytes(publicKey *ecdsa.PublicKey) ([]byte) {
-	return append(publicKey.X.Bytes(), publicKey.Y.Bytes()...)
+func PublicKeyToBytes(publicKey *ecdsa.PublicKey) ([]byte, error) {
+	return append(publicKey.X.Bytes(), publicKey.Y.Bytes()...), nil
 }
 
 func BytesToPublicKey(pubKeyBytes []byte) (*ecdsa.PublicKey, error) {
@@ -63,11 +61,14 @@ func BytesToPublicKey(pubKeyBytes []byte) (*ecdsa.PublicKey, error) {
 }
 
 func PublicKeyHashRipeMD160(pubKey *ecdsa.PublicKey) []byte {
-	pubKeyBytes := PublicKeyToBytes(pubKey)
+	pubKeyBytes, err := PublicKeyToBytes(pubKey)
+	if err != nil {
+		return nil
+	}
 	pubKeyHash := sha256.Sum256(pubKeyBytes)
 	ripeMDHasher := ripemd160.New()
 	_, _ = ripeMDHasher.Write(pubKeyHash[:])
-	return ripeMDHasher.Sum(nil)
+	return pubKeyHash[:]
 }
 
 func GenerateAddress(publicKey *ecdsa.PublicKey) string {
@@ -130,10 +131,14 @@ func decrypt(data, passphrase string) (string, error) {
 
 func (w *Wallet) SaveToFile(fileName string) error {
 	// Serialize private key, public key, and address
+	pubKeyBytes, err := PublicKeyToBytes(w.PublicKey)
+	if err != nil {
+		return err
+	}
 	data := fmt.Sprintf(
 		"%x\n%x\n%s",
 		w.PrivateKey.D.Bytes(),
-		PublicKeyToBytes(w.PublicKey),
+		pubKeyBytes,
 		w.Address,
 	)
 
@@ -210,6 +215,15 @@ func LoadAllWallets(fileName string) ([]*Wallet, error) {
 }
 
 func GenerateWallet(filename string) (*Wallet, error) {
+
+	if _, err := os.Stat(filename); err == nil {
+		wallets, err := LoadAllWallets(filename)
+		if err == nil && len(wallets) > 0 {
+			fmt.Printf("Wallet already exists! Your address: %s\n", wallets[0].Address)
+			return wallets[0], nil 
+		}
+	}
+
 	wallet := &Wallet{}
 	if err := wallet.GenerateKeyPair(); err != nil {
 		return nil, err
@@ -235,5 +249,8 @@ func PubKeyFromAddress(address string) ([]byte, error) {
 	if bytes.Equal(actualChecksum, targetChecksum) {
 		return pubKeyHash, nil
 	}
-	return nil, errors.New("this is not a valid address!!!!")
+	return nil, errors.New("this is not a valid address")
 }
+
+
+

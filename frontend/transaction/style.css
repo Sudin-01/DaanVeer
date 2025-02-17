@@ -1,0 +1,132 @@
+/* General Reset */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Body Styling */
+body {
+    font-family: 'Montserrat', sans-serif;
+    background-color: #f9f9f9;
+    color: #333;
+    line-height: 1.6;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+
+/* Container for both boxes */
+.container {
+    display: flex;
+    gap: 50px; /* Space between the two boxes */
+    width: 90%;
+    max-width: 1200px; /* Wider container */
+    justify-content: center;
+}
+
+/* Login Box Styling */
+.login-box, .info {
+    background-color: #fff;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    width: 50%; /* Each box takes up roughly half the container */
+    max-width: 500px; /* Wider boxes */
+    margin: auto;
+}
+
+.login-box h2, .info h2 {
+    font-size: 24px;
+    margin-bottom: 20px;
+    text-align: center;
+    color: #444;
+}
+
+/* Form Styling */
+.user-box {
+    position: relative;
+    margin-bottom: 20px;
+}
+
+.user-box input {
+    width: 100%;
+    padding: 10px 0;
+    font-size: 16px;
+    color: #333;
+    border: none;
+    border-bottom: 1px solid #ccc;
+    outline: none;
+    background: transparent;
+    transition: border-color 0.3s ease;
+}
+
+.user-box input:focus {
+    border-bottom-color: #666;
+}
+
+.user-box label {
+    position: absolute;
+    top: 10px;
+    left: 0;
+    font-size: 16px;
+    color: #999;
+    pointer-events: none;
+    transition: 0.3s ease;
+}
+
+.user-box input:focus ~ label,
+.user-box input:valid ~ label {
+    top: -10px;
+    font-size: 12px;
+    color: #666;
+}
+
+/* Button Styling */
+.btn {
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    color: #fff;
+    background-color: #29B6F6;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+.btn:hover {
+    background-color: #039BE5;
+}
+
+/* Info Box Styling */
+.info-box {
+    margin-bottom: 20px;
+}
+
+.info-box label {
+    font-size: 14px;
+    color: #666;
+    display: block;
+    margin-top: 10px;
+}
+
+.info-box .val {
+    font-size: 16px;
+    color: #333;
+    margin-top: 5px;
+    word-wrap: break-word; 
+    overflow-wrap: break-word; 
+    white-space: normal; 
+}
+
+/* Clear Button Styling */
+#clear-btn {
+    background-color: #4FC3F7;
+}
+
+#clear-btn:hover {
+    background-color: #c0392b;
+}

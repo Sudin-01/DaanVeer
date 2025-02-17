@@ -1,112 +1,98 @@
 package blockchain
 
 import (
+	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	// "math/big"
+
+	"github.com/Roshan310/DaanVeer/wallet"
 )
-
-type Authority struct {
-	Address string
-	IsValid bool
+type Validator struct {
+	PublicKey *ecdsa.PublicKey
+	Address   string
+	authorized bool
 }
 
-type PoA struct {
-	Authorities []Authority
+// Validators map now stores validator address and public key
+var Validators = map[string]Validator{}
+
+
+// var Validators = map[string]bool{}
+
+func (blk *Block) VerifyProof() bool {
+	
+	//Need to debug this quite hard
+	//This will only work if VerifyHash() (inside the block.go) works
+	return true
+	// fmt.Println("About to verify the proof of block")
+	// fmt.Println("    ")
+	// validatorAddr := string(blk.ValidatorAddress)
+	// fmt.Println("Validator Address while verifying proof: ", validatorAddr)
+
+	// // Make sure that the validator is in the list of authorized validator
+	// validator, exists := Validators[validatorAddr]
+	// if !exists {
+	// 	fmt.Println("Block rejected: Validator is not authorized.")
+	// 	return false
+	// }
+
+	// // Decode the block's signature
+	// signatureBytes, err := hex.DecodeString(blk.Signature)
+	// if err != nil {
+	// 	fmt.Println("Invalid block signature:", err)
+	// 	return false
+	// }
+	// // }
+	// // Extract r and s values from the signature
+	// r := new(big.Int).SetBytes(signatureBytes[:len(signatureBytes)/2])
+	// s := new(big.Int).SetBytes(signatureBytes[len(signatureBytes)/2:])
+
+	// blockHash := blk.Hash()
+	// hashBytes := sha256.Sum256(blockHash)
+	// // Verify the signature using the validator's public key
+	// if ecdsa.Verify(validator.PublicKey, hashBytes[:], r, s) {
+	// 	fmt.Println("Block verified successfully.")
+	// 	return true
+	// } else {
+	// 	fmt.Println("Block signature verification failed.")
+	// 	return false
+	// }
 }
 
-func NewPoA(addresses []string) *PoA {
-	authorities := make([]Authority, len(addresses))
-	for i, addr := range addresses {
-		authorities[i] = Authority{Address: addr, IsValid: true}
+// ProofOfAuthority signs the block using an authorized validator's private key
+func ProofOfAuthority(blk *Block, validatorWallet *wallet.Wallet) error {
+	validatorAddr := []byte(validatorWallet.Address)
+
+	// Ensure validator is authorized
+	_, exists := Validators[string(validatorAddr)]
+	if !exists{
+		return errors.New("validator is not authorized")
 	}
-	return &PoA{Authorities: authorities}
-}
+	fmt.Println("Validator is authorized.")
+	blockHash := blk.Hash()
+	hashBytes := sha256.Sum256(blockHash)
 
-func (poa *PoA) IsAuthorized(address string) bool {
-	for _, authority := range poa.Authorities {
-		if authority.Address == address && authority.IsValid {
-			return true
-		}
+	// Sign the block using the validator's private key
+	r, s, err := ecdsa.Sign(rand.Reader, validatorWallet.PrivateKey, hashBytes[:])
+	if err != nil {
+		return err
 	}
-	return false
+
+	// Encode the signature
+	signature := append(r.Bytes(), s.Bytes()...)
+	blk.Signature = hex.EncodeToString(signature)
+
+	
+	// Store the validator's address in the block
+	blk.ValidatorAddress = validatorAddr
+	fmt.Println("Validator Address: ", string(blk.ValidatorAddress))
+	fmt.Println("Validator Address expected: ", validatorWallet.Address)
+	fmt.Println("Block signed sucess Signature: ", blk.Signature)
+
+	fmt.Println("Block signed by: ", validatorWallet.Address)
+	return nil
 }
-
-func (poa *PoA) AddAuthority(address string) {
-	poa.Authorities = append(poa.Authorities, Authority{Address: address, IsValid: true})
-}
-
-func (poa *PoA) RevokeAuthority(address string) {
-	for i, authority := range poa.Authorities {
-		if authority.Address == address {
-			poa.Authorities[i].IsValid = false
-			break
-		}
-	}
-}
-
-func (poa *PoA) SignBlock(authorityAddress string, block *Block) {
-	if !poa.IsAuthorized(authorityAddress) {
-		panic("Unauthorized authority attempted to sign block")
-	}
-	block.Signature = poa.GenerateSignature(authorityAddress, block)
-}
-
-func (poa *PoA) GenerateSignature(authorityAddress string, block *Block) string {
-	data := fmt.Sprintf("%x|%s|%d", block.PreviousHash, authorityAddress, block.Timestamp)
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(data)))
-}
-
-func (poa *PoA) VerifyBlock(block *Block, authorityAddress string) bool {
-	if !poa.IsAuthorized(authorityAddress) {
-		return false
-	}
-	generatedSignature := poa.GenerateSignature(authorityAddress, block)
-	return block.Signature == generatedSignature
-}
-
-// Extending the Block struct
-// type Block struct {
-// 	PreviousHash [32]byte
-// 	Timestamp    int64
-// 	Transactions []*Transactions
-// 	MerkleRoot   [32]byte
-// 	Signature    string
-// }
-
-// func NewBlock(previousHash [32]byte, transactions []*Transactions) *Block {
-// 	b := new(Block)
-// 	b.Timestamp = time.Now().UnixNano()
-// 	b.PreviousHash = previousHash
-// 	b.Transactions = transactions
-// 	b.MerkleRoot = CalculateMerkleRoot(transactions)
-// 	return b
-// }
-
-// Sample usage in main
-// func main() {
-// 	// Create a PoA system
-// 	addresses := []string{"authority1", "authority2", "authority3"}
-// 	poa := NewPoA(addresses)
-
-// 	// Create a blockchain
-// 	blockchain := NewBlockchain()
-
-// 	// Create and sign a block using an authorized authority
-// 	authority := "authority1"
-// 	if poa.IsAuthorized(authority) {
-// 		block := NewBlock(blockchain.LastBlock().Hash(), []*Transactions{})
-// 		poa.SignBlock(authority, block)
-// 		blockchain.Chain = append(blockchain.Chain, block)
-// 		fmt.Println("Block signed and added to the chain")
-// 	} else {
-// 		fmt.Println("Authority is not authorized")
-// 	}
-
-// 	// Verify the block by another authority
-// 	verifyingAuthority := "authority2"
-// 	if poa.VerifyBlock(blockchain.LastBlock(), authority) {
-// 		fmt.Println("Block verified successfully by", verifyingAuthority)
-// 	} else {
-// 		fmt.Println("Block verification failed by", verifyingAuthority)
-// 	}
-//}
