@@ -251,6 +251,3 @@ func PubKeyFromAddress(address string) ([]byte, error) {
 	}
 	return nil, errors.New("this is not a valid address")
 }
-
-
-
