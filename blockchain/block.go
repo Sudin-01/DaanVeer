@@ -25,7 +25,6 @@ type Block struct {
 	Timestamp    uint64
 	BlockHash []byte
 	Height uint64
-	Transactions []Transactions
 	Signature	string
 	ValidatorAddress []byte
 	TxMerkleTree *MerkleTree
@@ -42,15 +41,18 @@ func (b *Block) Print() {
 	fmt.Printf("Timestamp:       %d\n", b.Timestamp)
 	fmt.Printf("Previous Hash:   %x\n", b.PreviousHash)
 	fmt.Printf("Block Hash :     %x\n", b.BlockHash)
-	for _, t := range b.Transactions {
-		t.Print()
-	}
 }
 
 func (b *Block) Hash() []byte {
     var buff bytes.Buffer
     tempBlock := *b 
     tempBlock.BlockHash = nil
+
+	//THIS WAS CAUSING THE WHOLE "BLOCK SIGNATURE FAILED" ERROR
+	//Block hash was computed (inside POA function in consensus.go) before the block was signed
+	//So, the block hash was different from the one that was signed
+	//So, just had to remove the signature while hashing the block
+	tempBlock.Signature = "" 
 
     enc := gob.NewEncoder(&buff)
     err := enc.Encode(tempBlock)
@@ -81,7 +83,6 @@ func (b *Block) MarshalJSON() ([]byte, error) {
 		Timestamp:    b.Timestamp,
 		PreviousHash:  fmt.Sprintf("%x", b.PreviousHash),
 		MerkleRoot:   merkleRootHash,
-		Transactions: b.Transactions,
 	})
 }
 
@@ -117,14 +118,11 @@ func CreateGenesisBlock() *Block {
 
 func (block *Block) VerifyBlockHash() bool {
 
-	// I can't understand why this is not working
-	//block.Hash() and block.BlockHash doesn't match
-	return true
-	// fmt.Println("Inside verify block hash block property: ", block)
-	// computedBlockHash := block.Hash()
-	// fmt.Println("Computed Block Hash: ", computedBlockHash)
-	// fmt.Println("Block Hash: ", block.BlockHash)
-	// return bytes.Equal(block.Hash(), block.BlockHash)
+	fmt.Println("Inside verify block hash block property: ", block)
+	computedBlockHash := block.Hash()
+	fmt.Println("Computed Block Hash: ", computedBlockHash)
+	fmt.Println("Block Hash: ", block.BlockHash)
+	return bytes.Equal(block.Hash(), block.BlockHash)
 }
 
 func (block *Block) MineBlock(chain *BlockChain, wlt *wallet.Wallet) error {
@@ -174,9 +172,9 @@ func (block *Block) MineBlock(chain *BlockChain, wlt *wallet.Wallet) error {
 	// 	return err
 	// }
 
-	// block.ValidatorAddress = validatorAddress
+	// block.ValidatorAddress = []byte(Validators[string(wlt.Address)].Address)
+	fmt.Println("Validator Address while mining the block: ", block.ValidatorAddress)
 	block.BlockHash = block.Hash()
-	fmt.Println("Block information: ", block)
 
 	return nil
 }
