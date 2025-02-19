@@ -84,11 +84,8 @@ func ProofOfAuthority(blk *Block, validatorWallet *wallet.Wallet) error {
 	signature := append(r.Bytes(), s.Bytes()...)
 	blk.Signature = hex.EncodeToString(signature)
 
-	
-
 	fmt.Println("Validator Address inside the PoA function: ", string(blk.ValidatorAddress))
 	fmt.Println("Validator Address expected: ", validatorWallet.Address)
-	fmt.Println("Block signed sucess Signature: ", blk.Signature)
 
 	return nil
 }
