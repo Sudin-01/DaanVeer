@@ -159,5 +159,3 @@ func DeserializeTxFromGOB(serializedTx []byte) (*Transactions, error) {
 	err := gob.NewDecoder(bytes.NewReader(serializedTx)).Decode(&tx)
 	return &tx, err
 }
-
-
