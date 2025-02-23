@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"time"
+	"encoding/hex"
 
 	"github.com/Roshan310/DaanVeer/wallet"
 	"github.com/dgraph-io/badger/v4"
@@ -44,24 +45,21 @@ func (b *Block) Print() {
 }
 
 func (b *Block) Hash() []byte {
-    var buff bytes.Buffer
     tempBlock := *b 
     tempBlock.BlockHash = nil
+    tempBlock.Signature = "" 
+    tempBlock.TxMerkleTree = nil
 
-	//THIS WAS CAUSING THE WHOLE "BLOCK SIGNATURE FAILED" ERROR
-	//Block hash was computed (inside POA function in consensus.go) before the block was signed
-	//So, the block hash was different from the one that was signed
-	//So, just had to remove the signature while hashing the block
-	tempBlock.Signature = "" 
-
-    enc := gob.NewEncoder(&buff)
-    err := enc.Encode(tempBlock)
+    // Use JSON instead of gob
+    blockJSON, err := json.Marshal(tempBlock)
     if err != nil {
         fmt.Println("Error while encoding block:", err)
     }
-    hash := sha256.Sum256(buff.Bytes())
+    
+    hash := sha256.Sum256(blockJSON)
     return hash[:]
 }
+
 
 func (b *Block) MarshalJSON() ([]byte, error) {
 	var merkleRootHash string
@@ -117,11 +115,11 @@ func CreateGenesisBlock() *Block {
 }
 
 func (block *Block) VerifyBlockHash() bool {
-
 	fmt.Println("Inside verify block hash block property: ", block)
 	computedBlockHash := block.Hash()
 	fmt.Println("Computed Block Hash: ", computedBlockHash)
-	fmt.Println("Block Hash: ", block.BlockHash)
+	fmt.Println("Block Hash in byte: ", block.BlockHash)
+	fmt.Println("Block Hash in string: ", hex.EncodeToString(block.BlockHash))
 	return bytes.Equal(block.Hash(), block.BlockHash)
 }
 

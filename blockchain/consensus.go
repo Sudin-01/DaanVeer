@@ -20,6 +20,29 @@ type Validator struct {
 // Validators map now stores validator address and public key
 var Validators = map[string]Validator{}
 
+func init() {
+	authorityAddress := "25ayHZZTtyoMzhNSYwP9ivjpvWABqJw6uhQ9AHoY7eWo1Cb8jT"
+	authorityPubKeyHex := "fb5be55e3b3efa104ee8d2c55407c811af6187681ddcec3de266d39ab8909d80c8fdb4fe2ce1b6c7c6a85f23454e50acdba8f2d4bef022759b6cadee13b6a9de"
+
+	pubKeyBytes, err := hex.DecodeString(authorityPubKeyHex)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to decode public key: %v", err))
+	}
+	
+	pubKey, err := wallet.BytesToPublicKey(pubKeyBytes)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to convert bytes to public key: %v", err))
+	}
+
+	Validators[authorityAddress] = Validator{
+		PublicKey: pubKey,
+		Address:   authorityAddress,
+		authorized: true,
+	}
+
+	fmt.Println("Authority added sucessfully")
+}
+
 
 func (blk *Block) VerifyProof() bool {
 	
@@ -49,7 +72,10 @@ func (blk *Block) VerifyProof() bool {
 	s := new(big.Int).SetBytes(signatureBytes[len(signatureBytes)/2:])
 
 	blockHash := blk.Hash()
+
+	fmt.Println("Block Hash inside verify proof: ", blockHash)
 	// // Verify the signature using the validator's public key
+	fmt.Println("Validator public key: ", validator.PublicKey)
 	if ecdsa.Verify(validator.PublicKey, blockHash[:], r, s) {
 		fmt.Println("Block verified successfully.")
 		return true
