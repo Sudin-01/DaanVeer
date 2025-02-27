@@ -2,8 +2,8 @@
 //To test the port run the following cmd commnand:
 // netstat -ano | findstr LISTENING
 // These are the current known nodes
-// "192.168.1.75:139" : Roshan or "172.16.6.90:139"
-//"192.168.1.83:139"  : Sudin
+// "192.168.1.75:139" : Roshan (Home WiFi) or "172.16.1.31:139" (College WiFi)
+//"192.168.1.83:139"  : Sudin (Home WiFi) or "172.16.1.73:139" (College)
 package communication
 
 import (
@@ -219,7 +219,7 @@ func sendInv(addr string, kind MESSAGE_TYPE, inventories [][]byte) {
 	data := GobEncode(inv)
 	var payload Inv
 	gob.NewDecoder(bytes.NewBuffer(data)).Decode(&payload)
-	fmt.Printf("%x\n", data)
+	fmt.Printf("Sending an inventory: %x (Inside the sendInv function)\n", data)
 	data = append(CommandToBytes("inv"), data...)
 	sendData(addr, data)
 }
