@@ -5,12 +5,13 @@ import (
 	"bytes"
 	"errors"
 	"github.com/dgraph-io/badger/v4"
-	// "github.com/Roshan310/DaanVeer/wallet"
+	"github.com/Roshan310/DaanVeer/wallet"
 )
 
 const(
 	DB_PATH = "./db"
 	LAST_BLOCK_HASH = "last_hash"
+	BALANCE_PREFIX = "balance_"
 )
 
 type BlockChain struct {
@@ -116,9 +117,9 @@ func (blockchain *BlockChain) GetLastNBlocks(n uint64) []*Block {
 	iter := BlockChainIterator{CurrentHash: blockchain.LastHash, Database: blockchain.Database}
 	for block, i := iter.GetBlockAndIter(), uint64(0); i < n && block != nil; block, i = iter.GetBlockAndIter(), i+1 {
 		lastNBlocks = append(lastNBlocks, block)
-		fmt.Println("Block: ", block)
+		// fmt.Println("Block: ", block)
 	}
-	fmt.Println("Last N blocks: ", lastNBlocks)
+	// fmt.Println("Last N blocks: ", lastNBlocks)
 	return lastNBlocks
 }
 
@@ -231,4 +232,36 @@ func (blockchain *BlockChain) GetLastNTxs(n uint64) []*Transactions {
 	}
 
 	return lastNTxs
+}
+
+//it will return the available balance in a wallet
+//it needs to be refined
+func (chain *BlockChain) GetWalletBalance(address string) (uint64, error) {
+	var balance uint64
+	pubKeyHash, err := wallet.PubKeyFromAddress(address)
+	if err != nil {
+		return 0, fmt.Errorf("invalid address: %v", err)
+	}
+
+	iter := BlockChainIterator{CurrentHash: chain.LastHash, Database: chain.Database}
+	for block := iter.GetBlockAndIter(); block != nil; block = iter.GetBlockAndIter() {
+		if block.TxMerkleTree != nil {
+			for _, node := range block.TxMerkleTree.Nodes {
+				tx := node.Transaction
+				// fmt.Println("Inside the GetWalletBalance function, transaction list: ", tx)
+				// fmt.Println("Receipent hash: ", pubKeyHash)
+				if bytes.Equal(tx.SenderHash, []byte("GENESIS")) && bytes.Equal(tx.RecipientHash, pubKeyHash) {
+					balance += tx.Value
+				} else {
+					if bytes.Equal(tx.SenderHash, pubKeyHash) {
+						balance -= tx.Value
+					}
+					if bytes.Equal(tx.RecipientHash, pubKeyHash) {
+						balance += tx.Value 
+					}
+				}
+			}
+		}
+	}
+	return balance, nil
 }
