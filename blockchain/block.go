@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"log"
 	"time"
-	"encoding/hex"
+	// "encoding/hex"
 
 	"github.com/Roshan310/DaanVeer/wallet"
 	"github.com/dgraph-io/badger/v4"
@@ -16,6 +16,9 @@ import (
 const (
 	GENESIS_STRING = "THIS IS THE FIRST BLOCK"
 	GENESIS_TIMESTAMP = 1646919219
+	GENESIS_AMOUNT = 1000
+	//genesis address is my wallet address which will have amount of 1000 initially
+	GENESIS_ADDRESS = "5Dv7dCeuvoLntY5QueBDsConyi1hckMVjdLCeg6kdeeC6wE8G"
 )
 func init() {
 	log.SetPrefix("Blockchain: ")
@@ -51,6 +54,7 @@ func (b *Block) Hash() []byte {
     tempBlock.TxMerkleTree = nil
 
     // Use JSON instead of gob
+	//gob was causing a lot of problem (hash mis-match) so changed to JSON
     blockJSON, err := json.Marshal(tempBlock)
     if err != nil {
         fmt.Println("Error while encoding block:", err)
@@ -73,6 +77,7 @@ func (b *Block) MarshalJSON() ([]byte, error) {
 		BlockHash    string        `json:"block_hash"`
 		Timestamp    uint64          `json:"timestamp"`
 		PreviousHash string     `json:"previous_hash"`
+		ValidatorAddress string `json: "validator_address"`
 		MerkleRoot   string     `json:"merkle_root"`
 		Transactions []Transactions `json:"transactions"`
 	}{
@@ -80,6 +85,7 @@ func (b *Block) MarshalJSON() ([]byte, error) {
 		BlockHash:    fmt.Sprintf("%x", b.BlockHash),
 		Timestamp:    b.Timestamp,
 		PreviousHash:  fmt.Sprintf("%x", b.PreviousHash),
+		ValidatorAddress: string(b.ValidatorAddress),
 		MerkleRoot:   merkleRootHash,
 	})
 }
@@ -105,22 +111,38 @@ func DeserializeBlockFromGOB(serializedBlock []byte) (*Block, error) {
 }
 
 func CreateGenesisBlock() *Block {
+	genesisPubKeyHash, err := wallet.PubKeyFromAddress(GENESIS_ADDRESS)
+	if err != nil {
+		log.Panic("invalid genesis address: %v", err)
+	}
+
+	genesisTx := Transactions{
+		SenderHash: []byte("GENESIS"),
+		RecipientHash: genesisPubKeyHash,
+		Value: GENESIS_AMOUNT,
+		Timestamp: GENESIS_TIMESTAMP,
+	}
+	genesisTx.TxID = genesisTx.Hash()
+	txPool := []Transactions{genesisTx}
+	merkleTree := NewMerkleTree(txPool)
+
 	block_hash := sha256.Sum256([]byte(GENESIS_STRING))
 	block := Block{
 		Timestamp: GENESIS_TIMESTAMP,
 		Height: 0,
 		BlockHash: block_hash[:],
+		TxMerkleTree: merkleTree,
 	}
 	return &block
 }
 
 func (block *Block) VerifyBlockHash() bool {
-	fmt.Println("Inside verify block hash block property: ", block)
+	// fmt.Println("Inside verify block hash block property: ", block)
 	computedBlockHash := block.Hash()
-	fmt.Println("Computed Block Hash: ", computedBlockHash)
-	fmt.Println("Block Hash in byte: ", block.BlockHash)
-	fmt.Println("Block Hash in string: ", hex.EncodeToString(block.BlockHash))
-	return bytes.Equal(block.Hash(), block.BlockHash)
+	// fmt.Println("Computed Block Hash: ", computedBlockHash)
+	// fmt.Println("Block Hash in byte: ", block.BlockHash)
+	// fmt.Println("Block Hash in string: ", hex.EncodeToString(block.BlockHash))
+	return bytes.Equal(computedBlockHash, block.BlockHash)
 }
 
 func (block *Block) MineBlock(chain *BlockChain, wlt *wallet.Wallet) error {
@@ -171,7 +193,7 @@ func (block *Block) MineBlock(chain *BlockChain, wlt *wallet.Wallet) error {
 	// }
 
 	// block.ValidatorAddress = []byte(Validators[string(wlt.Address)].Address)
-	fmt.Println("Validator Address while mining the block: ", block.ValidatorAddress)
+	// fmt.Println("Validator Address while mining the block: ", block.ValidatorAddress)
 	block.BlockHash = block.Hash()
 
 	return nil
