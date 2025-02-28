@@ -1,17 +1,18 @@
 package blockchain
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/gob"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
 	"time"
-	"bytes"
-	"encoding/gob"
-	"encoding/hex"
 
 	"github.com/Roshan310/DaanVeer/wallet"
 )
@@ -89,6 +90,14 @@ func (tx *Transactions) UnmarshalJSON(data []byte) error {
 
 func NewTransaction(srcWallet *wallet.Wallet, destinationAddr string, amount uint64, chain *BlockChain) (*Transactions, error) {
 	senderAddress := string(srcWallet.Address)
+	senderBalance, err := chain.GetWalletBalance(senderAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sender balance: %v", err)
+	}
+
+	if senderBalance < amount {
+		return nil, errors.New("you don't have sufficient balance to donate")
+	}
 	senderPubKeyHash, err := wallet.PubKeyFromAddress(senderAddress)
 	if err != nil {
 		return nil, err
