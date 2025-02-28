@@ -123,6 +123,18 @@ func GetMyWalletAddressResponse(wlt *wallet.Wallet) gin.HandlerFunc {
 	return fn
 }
 
+func GetMyWalletBalanceResponse(wlt *wallet.Wallet, chain *blockchain.BlockChain) gin.HandlerFunc {
+	fn := func(c *gin.Context) {
+		balance, err := chain.GetWalletBalance(string(wlt.Address))
+		if err != nil {
+			c.JSON(400, ErrorJSON{ErrorMsg: fmt.Sprintf("failed to get wallet balance: %v", err)})
+			return
+		}
+		c.JSON(200, gin.H{"address": string(wlt.Address), "balance": balance})
+	}
+	return fn
+}
+
 //these functions are for POST request handling
 
 func PostNewTransaction(wlt *wallet.Wallet, chain *blockchain.BlockChain) gin.HandlerFunc {
@@ -253,7 +265,7 @@ func PostMineBlock(chain *blockchain.BlockChain, wlt *wallet.Wallet) gin.Handler
 			fmt.Println("Error while adding block to chain:", err)
 		}
 		fmt.Println("Block added to chain:", newBlock)
-
+ 
 		// TODO: we clear the memory pool here but edit in later commit to remove only selected transactions
 		communication.MemoryPool = map[string]blockchain.Transactions{}
 
