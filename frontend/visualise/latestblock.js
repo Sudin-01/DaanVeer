@@ -21,6 +21,7 @@ fetchPromise
                 <td><a href="#" class="blockHeight">${bData.height}</a></td>
                 <td><a href="#" class="hashTd">${bData.block_hash}</a></td>
                 <td><div class="prevHash">${bData.previous_hash}</div></td>
+                <td><div class="prevHash">${bData.ValidatorAddress}</div></td>
                 <td><div class="dateString">${new Date(bData.timestamp * 1000).toLocaleDateString()}</div></td>
             `;
             tblBody.append(row);
