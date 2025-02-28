@@ -2,8 +2,8 @@
 //To test the port run the following cmd commnand:
 // netstat -ano | findstr LISTENING
 // These are the current known nodes
-// "192.168.1.75:139" : Roshan (Home WiFi) or "172.16.1.31:139" (College WiFi)
-//"192.168.1.83:139"  : Sudin (Home WiFi) or "172.16.1.73:139" (College)
+// "192.168.1.75:8080" : Roshan (Home WiFi) or "172.16.1.31:8080" (College WiFi)
+//"192.168.1.83:8080  : Sudin (Home WiFi) or "172.16.1.73:8080" (College)
 package communication
 
 import (
@@ -257,9 +257,14 @@ func HandleBlock(request []byte, bChain *blockchain.BlockChain) {
 	fmt.Printf("Received a block of hash: %x\n", payload.Block.BlockHash)
 
 	blockHashes := bChain.GetBlockHashesFromHeight(payload.Block.Height - 1)
+	fmt.Println("Block 0 hash: ", bChain.GetBlockHashesFromHeight(1))
+	fmt.Println("Payload blockHashes: ", blockHashes)
+	fmt.Println("Payload block height: ", payload.Block.Height)
 
 	if len(blockHashes) != 0 {
 		lastHash := blockHashes[len(blockHashes)-1]
+		fmt.Println("Payload previous hash: \n", payload.Block.PreviousHash)
+		fmt.Println("Last hash: ", lastHash)
 
 		if !bytes.Equal(payload.Block.PreviousHash, lastHash) {
 			log.Printf("Chain of this node invalid at height: %d", payload.Block.Height-1)
@@ -270,10 +275,13 @@ func HandleBlock(request []byte, bChain *blockchain.BlockChain) {
 
 	bChain.AddBlock(&payload.Block)
 
+	mutex.Lock()
+	defer mutex.Unlock()
+	fmt.Printf("blocks in transit before check: %v (length: %d)\n", blocksInTransit, len(blocksInTransit))
 	if len(blocksInTransit) > 0 {
+		fmt.Println("Processing Blocks in Transit: ", blocksInTransit)
 		blockHash := blocksInTransit[0]
 		sendGetData(payload.AddrFrom, BLOCK_TYPE, blockHash)
-
 		blocksInTransit = blocksInTransit[1:]
 	}
 }
@@ -438,12 +446,14 @@ func HandleInv(request []byte) {
 	}
 
 	if payload.Type == BLOCK_TYPE {
+		mutex.Lock()
 		blocksInTransit = payload.Data
 
 		if len(payload.Data) != 0 {
 			blockHash := payload.Data[0]
+			mutex.Unlock()
 			sendGetData(payload.AddrFrom, BLOCK_TYPE, blockHash)
-
+			mutex.Lock()
 			newInTransit := [][]byte{}
 			for _, b := range blocksInTransit {
 				if bytes.Compare(b, blockHash) != 0 {
@@ -452,6 +462,7 @@ func HandleInv(request []byte) {
 			}
 			blocksInTransit = newInTransit
 		}
+		mutex.Unlock()
 	}
 
 	if payload.Type == TX_TYPE {
@@ -564,7 +575,6 @@ func StartServer(nodeId string, chain *blockchain.BlockChain, wlt *wallet.Wallet
 		log.Panic(err)
 	}
 	defer ln.Close()
-
 	if nodeAddress != KnownNodes[0] {
 		for _, node := range KnownNodes {
 			if node != nodeAddress {

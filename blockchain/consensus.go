@@ -53,7 +53,7 @@ func (blk *Block) VerifyProof() bool {
 	fmt.Println("About to verify the proof of block")
 	fmt.Println("    ")
 	validatorAddr := string(blk.ValidatorAddress)
-	fmt.Println("Validator Address while verifying proof: ", validatorAddr)
+	// fmt.Println("Validator Address while verifying proof: ", validatorAddr)
 
 	// // Make sure that the validator is in the list of authorized validator
 	validator, exists := Validators[validatorAddr]
@@ -73,9 +73,9 @@ func (blk *Block) VerifyProof() bool {
 
 	blockHash := blk.Hash()
 
-	fmt.Println("Block Hash inside verify proof: ", blockHash)
+	// fmt.Println("Block Hash inside verify proof: ", blockHash)
 	// // Verify the signature using the validator's public key
-	fmt.Println("Validator public key: ", validator.PublicKey)
+	// fmt.Println("Validator public key: ", validator.PublicKey)
 	if ecdsa.Verify(validator.PublicKey, blockHash[:], r, s) {
 		fmt.Println("Block verified successfully.")
 		return true
@@ -87,7 +87,11 @@ func (blk *Block) VerifyProof() bool {
 
 // ProofOfAuthority signs the block using an authorized validator's private key
 func ProofOfAuthority(blk *Block, validatorWallet *wallet.Wallet) error {
-	validatorAddr := []byte(validatorWallet.Address)
+	validatorAddr := string(validatorWallet.Address)
+
+	if validatorAddr != ("25ayHZZTtyoMzhNSYwP9ivjpvWABqJw6uhQ9AHoY7eWo1Cb8jT") {
+		return errors.New("you are not authorized to mine the block")
+	}
 
 	// Ensure validator is authorized
 	_, exists := Validators[string(validatorAddr)]
@@ -95,9 +99,9 @@ func ProofOfAuthority(blk *Block, validatorWallet *wallet.Wallet) error {
 		return errors.New("validator is not authorized")
 	}
 	fmt.Println("Validator is authorized.")
-	blk.ValidatorAddress = validatorAddr
+	blk.ValidatorAddress = []byte(validatorAddr)
 	blockHash := blk.Hash()
-	fmt.Println("Block Hash inside PoA function: ", blockHash)
+	// fmt.Println("Block Hash inside PoA function: ", blockHash)
 	// hashBytes := sha256.Sum256(blockHash)
 
 	// Sign the block using the validator's private key
@@ -110,8 +114,8 @@ func ProofOfAuthority(blk *Block, validatorWallet *wallet.Wallet) error {
 	signature := append(r.Bytes(), s.Bytes()...)
 	blk.Signature = hex.EncodeToString(signature)
 
-	fmt.Println("Validator Address inside the PoA function: ", string(blk.ValidatorAddress))
-	fmt.Println("Validator Address expected: ", validatorWallet.Address)
+	// fmt.Println("Validator Address inside the PoA function: ", string(blk.ValidatorAddress))
+	// fmt.Println("Validator Address expected: ", validatorWallet.Address)
 
 	return nil
 }

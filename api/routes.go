@@ -40,6 +40,7 @@ func StartServer(wlt *wallet.Wallet, chain *blockchain.BlockChain, port string) 
 	// personal wallet endpoint
 	router.GET("/my-wallet/address", GetMyWalletAddressResponse(wlt))
 	router.GET("/my-wallet/info", GetMyWalletInfoResponse(wlt, chain))
+	router.GET("/my-wallet/balance", GetMyWalletBalanceResponse(wlt, chain))
 	// router.GET("/my-wallet/items", GetMyWalletInfoResponse(wlt, chain))
 
 	// transaction endpoint
