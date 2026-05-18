@@ -51,34 +51,7 @@ Traditional donation systems are opaque — donors have no way to verify where t
 
 ## System Architecture
 
-```
-┌────────────────────────────────────────────────────────┐
-│                     Frontend (HTML/JS)                 │
-│  index.html | transfer.html | mineblock.html |         │
-│  latestblock.html | getlastntx.html | minedTxn.html    │
-└───────────────────┬────────────────────────────────────┘
-                    │ HTTP REST (port 8080)
-┌───────────────────▼────────────────────────────────────┐
-│                  API Layer (Gin)                        │
-│  handlers.go | routes.go | middleware.go | models.go   │
-└───────────────────┬────────────────────────────────────┘
-                    │
-       ┌────────────┼─────────────┐
-       ▼            ▼             ▼
- ┌──────────┐ ┌──────────┐ ┌──────────────┐
- │Blockchain│ │  Wallet  │ │Communication │
- │  Layer   │ │  Layer   │ │  (P2P/TCP)   │
- │block.go  │ │wallet.go │ │  p2p.go      │
- │chain.go  │ │          │ │  node.go     │
- │consensus │ │          │ │knownNodes.json│
- │transaction│          │ │              │
- │merkle.go │ │          │ │              │
- └────┬─────┘ └──────────┘ └──────────────┘
-      │
- ┌────▼─────┐
- │ BadgerDB │  (persistent key-value store)
- └──────────┘
-```
+![System Architecture](images/Images/Blockchain(main).drawio.png)
 
 ---
 
