@@ -51,7 +51,7 @@ Traditional donation systems are opaque — donors have no way to verify where t
 
 ## System Architecture
 
-![System Architecture](Images/Blockchain(main).drawio.png)
+<img width="1380" height="768" alt="Image" src="https://github.com/user-attachments/assets/e3fadd64-e38f-4045-9e84-77a7fb414058" />
 
 ---
 
