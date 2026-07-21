@@ -26,6 +26,16 @@ type ChainConfig struct {
 	GenesisAmount    uint64            `json:"genesis_amount"`
 	GenesisTimestamp uint64            `json:"genesis_timestamp"`
 	Validators       []ValidatorConfig `json:"validators"`
+
+	// Quorum is the number of distinct validator signatures a block requires.
+	// Zero selects the default, ceil(2N/3). Experiments sweep this to measure
+	// the safety/liveness tradeoff (E3, E7).
+	Quorum int `json:"quorum,omitempty"`
+
+	// RequireSchedule enforces the round-robin proposer schedule. Disabling it
+	// lets any authorised validator propose at any height, which is the v1
+	// behaviour and is retained for comparison measurements.
+	RequireSchedule bool `json:"require_schedule"`
 }
 
 // ValidatorConfig lists a validator by public key only. The address is derived

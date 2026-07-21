@@ -38,6 +38,12 @@ type Block struct {
 	ValidatorAddress []byte
 	TxMerkleTree *MerkleTree
 
+	// Attestations are signatures from validators other than the proposer.
+	// They cover the block hash, which is fixed before any attestation is
+	// produced, so gathering them cannot change the block's identity -- and
+	// they are therefore excluded from the hash preimage.
+	Attestations []Attestation
+
 	// Txs is the authoritative, ordered transaction list for this block.
 	//
 	// Transactions were previously recovered by walking TxMerkleTree.Nodes,

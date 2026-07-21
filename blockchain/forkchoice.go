@@ -83,6 +83,18 @@ func (chain *BlockChain) validateBlock(blk *Block, parent *Block) error {
 	if !blk.VerifyProof() {
 		return errors.New("block is not signed by an authorized validator")
 	}
+	// The proposer must be the validator whose turn it is at this height, and
+	// the block must carry enough distinct attestations to be canonical.
+	// Neither constraint existed in v1: one hardcoded address could sign any
+	// block at any height, alone.
+	if cfg, err := ActiveConfig(); err == nil && cfg.RequireSchedule {
+		if err := blk.VerifySchedule(); err != nil {
+			return err
+		}
+	}
+	if err := blk.VerifyQuorum(); err != nil {
+		return err
+	}
 	if err := blk.VerifyTransactions(); err != nil {
 		return err
 	}

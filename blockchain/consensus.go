@@ -103,6 +103,15 @@ func ProofOfAuthority(blk *Block, validatorWallet *wallet.Wallet) error {
 		return errors.New("you are not authorized to mine the block")
 	}
 
+	// Enforce the proposer schedule at production time as well as validation
+	// time, so a validator does not build a block it cannot get accepted.
+	if cfg, err := ActiveConfig(); err == nil && cfg.RequireSchedule {
+		if !IsProposer(validatorAddr, blk.Height) {
+			expected, _ := ProposerFor(blk.Height)
+			return fmt.Errorf("not this node's turn to propose at height %d (expected %s)", blk.Height, expected)
+		}
+	}
+
 	blk.ValidatorAddress = []byte(validatorAddr)
 	blockHash := blk.Hash()
 
