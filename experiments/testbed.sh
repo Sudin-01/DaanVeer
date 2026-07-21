@@ -73,7 +73,12 @@ up() {
 
   echo "provisioning $n node(s)..."
   local shared_config="$TESTBED/chain.json"
+
+  # Wipe previous node state. `up` regenerates the chain configuration, so a
+  # retained database would belong to a different genesis -- silently mixing
+  # two chains and invalidating any measurement taken afterwards.
   rm -f "$shared_config"
+  rm -rf "$TESTBED"/node*
 
   # Node 1 bootstraps the chain: its wallet is the genesis recipient and the
   # first validator. Every other node adds itself as a validator.
@@ -86,6 +91,25 @@ up() {
       "$BIN" -add-validator -config "$shared_config" -wallet "$dir/wallet.txt" >/dev/null || exit 1
     fi
   done
+
+  # Optional consensus parameters, swept by the experiments:
+  #   QUORUM=k            require k distinct validator signatures (0 = ceil(2N/3))
+  #   REQUIRE_SCHEDULE=1  enforce the round-robin proposer schedule
+  if [[ -n "${QUORUM:-}" || -n "${REQUIRE_SCHEDULE:-}" ]]; then
+    python - "$shared_config" "${QUORUM:-0}" "${REQUIRE_SCHEDULE:-0}" <<'PY'
+import json, sys
+path, quorum, schedule = sys.argv[1], int(sys.argv[2]), sys.argv[3] not in ("", "0")
+with open(path) as fh:
+    cfg = json.load(fh)
+if quorum:
+    cfg["quorum"] = quorum
+cfg["require_schedule"] = schedule
+with open(path, "w") as fh:
+    json.dump(cfg, fh, indent=2)
+    fh.write("\n")
+PY
+    echo "  quorum=${QUORUM:-auto} require_schedule=${REQUIRE_SCHEDULE:-0}"
+  fi
 
   # One peer list, shared. Entry order matters: the first is the implicit
   # coordinator for transaction relay.

@@ -156,6 +156,46 @@ func (blk *Block) VerifyQuorum() error {
 	return nil
 }
 
+// ValidateProposal checks everything about a block except its quorum.
+//
+// A proposal is by definition not yet attested, so quorum cannot be required
+// when deciding whether to attest to it. Every other property -- hash
+// integrity, an authorised proposer, the schedule, and transaction validity --
+// must hold before a validator puts its signature on the block.
+func (blk *Block) ValidateProposal() error {
+	if !blk.VerifyBlockHash() {
+		return errors.New("block hash does not match its contents")
+	}
+	if !blk.VerifyProof() {
+		return errors.New("proposal is not signed by an authorized validator")
+	}
+	if cfg, err := ActiveConfig(); err == nil && cfg.RequireSchedule {
+		if err := blk.VerifySchedule(); err != nil {
+			return err
+		}
+	}
+	return blk.VerifyTransactions()
+}
+
+// AddAttestation merges an attestation from a peer, returning whether it was
+// counted. Invalid, duplicate and unauthorised attestations are discarded.
+func (blk *Block) AddAttestation(attestation Attestation) bool {
+	before := blk.CountAttestations()
+	for _, existing := range blk.Attestations {
+		if string(existing.ValidatorAddress) == string(attestation.ValidatorAddress) {
+			return false
+		}
+	}
+	blk.Attestations = append(blk.Attestations, attestation)
+
+	if blk.CountAttestations() > before {
+		return true
+	}
+	// Did not count: drop it again so invalid attestations cannot accumulate.
+	blk.Attestations = blk.Attestations[:len(blk.Attestations)-1]
+	return false
+}
+
 // VerifySchedule checks that the block was proposed by the validator whose turn
 // it was at that height.
 func (blk *Block) VerifySchedule() error {

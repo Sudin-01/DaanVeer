@@ -1,18 +1,19 @@
 package api
 
 import (
-	"crypto/rand"
-	"math/big"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"strconv"
+	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/Sudin-01/DaanVeer/blockchain"
 	"github.com/Sudin-01/DaanVeer/communication"
 	"github.com/Sudin-01/DaanVeer/wallet"
+	"github.com/gin-gonic/gin"
 )
 
 type ErrorJSON struct {
@@ -64,11 +65,10 @@ func GetLastNTxsResponse(chain *blockchain.BlockChain) gin.HandlerFunc {
 	return fn
 }
 
-
 func GetWalletInfoResponse(chain *blockchain.BlockChain) gin.HandlerFunc {
 	fn := func(c *gin.Context) {
 		walletAddress := c.Param("address")
-		
+
 		minedBlocks, err := chain.WalletMinedBlocks(walletAddress)
 		if err != nil {
 			c.JSON(400, ErrorJSON{ErrorMsg: "bad address: could not derive public key hash from address"})
@@ -81,7 +81,6 @@ func GetWalletInfoResponse(chain *blockchain.BlockChain) gin.HandlerFunc {
 	}
 	return fn
 }
-
 
 func GetMyWalletInfoResponse(wlt *wallet.Wallet, chain *blockchain.BlockChain) gin.HandlerFunc {
 	fn := func(c *gin.Context) {
@@ -257,6 +256,17 @@ func PostMineBlock(chain *blockchain.BlockChain, wlt *wallet.Wallet) gin.Handler
 			c.JSON(403, ErrorJSON{ErrorMsg: fmt.Sprintf("could not mine block: %v", err)})
 			return
 		}
+
+		// Gather attestations from peer validators until the quorum is met.
+		// Without this the proposer would commit alone and the configured
+		// quorum would be decorative.
+		roundStart := time.Now()
+		if err := communication.RunConsensusRound(newBlock, communication.DefaultRoundTimeout); err != nil {
+			c.JSON(409, ErrorJSON{ErrorMsg: fmt.Sprintf("consensus failed: %v", err)})
+			return
+		}
+		roundDuration := time.Since(roundStart)
+
 		if err := chain.AddBlock(newBlock); err != nil {
 			c.JSON(400, ErrorJSON{ErrorMsg: fmt.Sprintf("could not commit block: %v", err)})
 			return
@@ -268,7 +278,12 @@ func PostMineBlock(chain *blockchain.BlockChain, wlt *wallet.Wallet) gin.Handler
 			communication.SendBlock(node, newBlock)
 		}
 
-		c.JSON(200, newBlock)
+		c.JSON(200, gin.H{
+			"block":        newBlock,
+			"attestations": newBlock.CountAttestations(),
+			"quorum":       blockchain.QuorumSize(),
+			"consensus_ms": float64(roundDuration.Microseconds()) / 1000.0,
+		})
 	}
 	return fn
 }

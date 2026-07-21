@@ -541,6 +541,12 @@ func HandleConnection(conn net.Conn, chain *blockchain.BlockChain, wlt *wallet.W
 		fmt.Println("Receiving inventory")
 		HandleInv(req, chain)
 
+	case "proposal":
+		HandleProposal(req, chain, wlt)
+
+	case "attest":
+		HandleAttest(req)
+
 	case "getversion":
 		fmt.Println("Sending version")
 		HandleVersion(req, chain)
