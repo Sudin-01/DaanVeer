@@ -3,19 +3,36 @@ package api
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/Roshan310/DaanVeer/blockchain"
-	"github.com/Roshan310/DaanVeer/communication"
-	"github.com/Roshan310/DaanVeer/wallet"
+	"github.com/Sudin-01/DaanVeer/blockchain"
+	"github.com/Sudin-01/DaanVeer/communication"
+	"github.com/Sudin-01/DaanVeer/wallet"
 )
 
 const PORT = "8080"
 
-func StartServer(wlt *wallet.Wallet, chain *blockchain.BlockChain, port string) {
-	// gin.SetMode(gin.ReleaseMode)
+// P2P_PORT_ENV overrides the p2p listener port. The p2p listener and the HTTP
+// API previously shared a port, which prevented running both reliably and made
+// several nodes on one host impossible.
+const P2P_PORT_ENV = "DAANVEER_P2P_PORT"
 
-	go communication.StartServer(port, chain, wlt)
+// p2pPort returns the port the p2p listener binds, defaulting to the API port
+// plus one.
+func p2pPort(apiPort string) string {
+	if explicit := os.Getenv(P2P_PORT_ENV); explicit != "" {
+		return explicit
+	}
+	n, err := strconv.Atoi(apiPort)
+	if err != nil {
+		return apiPort
+	}
+	return strconv.Itoa(n + 1)
+}
+
+func StartServer(wlt *wallet.Wallet, chain *blockchain.BlockChain, port string) {
+	go communication.StartServer(p2pPort(port), chain, wlt)
 
 	gin_mode := os.Getenv("GIN_MODE")
 	if gin_mode == "" {
@@ -45,13 +62,17 @@ func StartServer(wlt *wallet.Wallet, chain *blockchain.BlockChain, port string) 
 
 	// transaction endpoint
 	router.GET("/transaction/last/:n", GetLastNTxsResponse(chain))
-	router.GET("/transaction/pool", GetTxPool)
+	router.GET("/transaction/pool", GetTxPool(chain))
 	router.POST("/transaction/new", PostNewTransaction(wlt, chain))
 
 	// token verification endpoint
 	router.GET("/token/sign/:token", SignToken(wlt))
 	router.POST("/token/verify", VerifyToken())
 
-	fmt.Println("GIN server started at port: ", PORT)
-	router.Run(":" + PORT)
+	// Previously bound the PORT constant rather than the argument, so the
+	// port flag had no effect on the HTTP API.
+	fmt.Println("HTTP API listening on port", port)
+	if err := router.Run(":" + port); err != nil {
+		fmt.Println("HTTP server stopped:", err)
+	}
 }

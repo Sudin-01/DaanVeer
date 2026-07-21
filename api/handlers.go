@@ -10,9 +10,9 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/Roshan310/DaanVeer/blockchain"
-	"github.com/Roshan310/DaanVeer/communication"
-	"github.com/Roshan310/DaanVeer/wallet"
+	"github.com/Sudin-01/DaanVeer/blockchain"
+	"github.com/Sudin-01/DaanVeer/communication"
+	"github.com/Sudin-01/DaanVeer/wallet"
 )
 
 type ErrorJSON struct {
@@ -233,55 +233,54 @@ func SignToken(wlt *wallet.Wallet) gin.HandlerFunc {
 	return fn
 }
 
+// PostMineBlock mines the pending transactions into a new block.
+//
+// The transaction set comes from the node's own mempool, not from the request
+// body. Previously the caller supplied the transactions to mine, which meant an
+// unauthenticated client chose a block's contents; errors from block assembly,
+// mining and commit were all printed and then discarded, so the endpoint
+// returned 200 with an empty block when any of them failed.
 func PostMineBlock(chain *blockchain.BlockChain, wlt *wallet.Wallet) gin.HandlerFunc {
 	fn := func(c *gin.Context) {
-		var txModelPool []TransactionsModel
-		if err := c.BindJSON(&txModelPool); err != nil {
-			c.AbortWithError(400, err)
+		txPool := chain.Mempool.All()
+		if len(txPool) == 0 {
+			c.JSON(400, ErrorJSON{ErrorMsg: "no pending transactions to mine"})
 			return
-		}
-		var txPool []blockchain.Transactions
-		for _, txModel := range txModelPool {
-			tx, err := ModelToTx(txModel)
-			if err != nil {
-				fmt.Println("Error while converting tx model to tx:", err)
-				c.AbortWithError(400, err)
-				return
-			}
-			txPool = append(txPool, *tx)
 		}
 
 		newBlock := blockchain.CreateBlock()
-		fmt.Println("New block created:", newBlock)
-		newBlock.AddTxToBlock(txPool)
-		fmt.Println("Transactions added to block:", newBlock)
-		err := newBlock.MineBlock(chain, wlt)
-		if err != nil {
-			fmt.Println("Error while mining block:", err)
+		if err := newBlock.AddTxToBlock(txPool); err != nil {
+			c.JSON(400, ErrorJSON{ErrorMsg: fmt.Sprintf("could not assemble block: %v", err)})
+			return
 		}
-		fmt.Println("Block mined:", newBlock)
-		err = chain.AddBlock(newBlock)
-		if err != nil {
-			fmt.Println("Error while adding block to chain:", err)
+		if err := newBlock.MineBlock(chain, wlt); err != nil {
+			c.JSON(403, ErrorJSON{ErrorMsg: fmt.Sprintf("could not mine block: %v", err)})
+			return
 		}
-		fmt.Println("Block added to chain:", newBlock)
- 
-		// TODO: we clear the memory pool here but edit in later commit to remove only selected transactions
-		communication.MemoryPool = map[string]blockchain.Transactions{}
+		if err := chain.AddBlock(newBlock); err != nil {
+			c.JSON(400, ErrorJSON{ErrorMsg: fmt.Sprintf("could not commit block: %v", err)})
+			return
+		}
+
+		// AddBlock removes the mined transactions from the mempool, so only
+		// the transactions actually included are cleared.
+		for _, node := range communication.KnownNodes {
+			communication.SendBlock(node, newBlock)
+		}
 
 		c.JSON(200, newBlock)
 	}
 	return fn
 }
 
-func GetTxPool(c *gin.Context) {
-	// fn := func(c *gin.Context) {
-		var txsInPools []blockchain.Transactions
-		for _, tx := range communication.MemoryPool {
-			txsInPools = append(txsInPools, tx)
+// GetTxPool lists the node's pending transactions.
+func GetTxPool(chain *blockchain.BlockChain) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		txs := chain.Mempool.All()
+		if txs == nil {
+			txs = []blockchain.Transactions{}
 		}
-		fmt.Println("txsInPools: ", txsInPools)
-		c.JSON(200, txsInPools)
-	// }
+		c.JSON(200, txs)
+	}
 	// return fn
 }

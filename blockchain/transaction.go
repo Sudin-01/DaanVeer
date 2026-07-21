@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/gob"
 	"encoding/hex"
 	"encoding/json"
@@ -14,11 +15,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Roshan310/DaanVeer/wallet"
+	"github.com/Sudin-01/DaanVeer/wallet"
 )
+// TX_VERSION prefixes the canonical encoding so the hash preimage format can
+// be changed later without silently colliding with previously signed data.
+const TX_VERSION byte = 2
+
+// GENESIS_SENDER marks the coinbase-style transaction in the genesis block.
+var GENESIS_SENDER = []byte("GENESIS")
+
 type Transactions struct {
 	TxID          []byte `json:"-"`
 	SenderHash    []byte `json:"-"`
+	SenderPubKey  []byte `json:"-"`
 	RecipientHash []byte `json:"-"`
 	Value         uint64 `json:"value"`
 	Signature     []byte `json:"-"`
@@ -90,13 +99,16 @@ func (tx *Transactions) UnmarshalJSON(data []byte) error {
 
 func NewTransaction(srcWallet *wallet.Wallet, destinationAddr string, amount uint64, chain *BlockChain) (*Transactions, error) {
 	senderAddress := string(srcWallet.Address)
-	senderBalance, err := chain.GetWalletBalance(senderAddress)
+	// Check against the spendable balance -- committed funds less those already
+	// reserved by unmined transactions. Checking committed state alone let a
+	// sender spend the same balance repeatedly before any block was produced.
+	senderBalance, err := chain.SpendableBalance(senderAddress)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sender balance: %v", err)
 	}
 
 	if senderBalance < amount {
-		return nil, errors.New("you don't have sufficient balance to donate")
+		return nil, fmt.Errorf("insufficient spendable balance: have %d, need %d", senderBalance, amount)
 	}
 	senderPubKeyHash, err := wallet.PubKeyFromAddress(senderAddress)
 	if err != nil {
@@ -115,8 +127,16 @@ func NewTransaction(srcWallet *wallet.Wallet, destinationAddr string, amount uin
 		Timestamp: uint64(time.Now().Unix()),
 	}
 
-	newTx.TxID = newTx.Hash()
-	newTx.SignTransaction(srcWallet)
+	// SignTransaction sets SenderPubKey and TxID before signing, since both are
+	// part of the signed preimage.
+	if err := newTx.SignTransaction(srcWallet); err != nil {
+		return nil, fmt.Errorf("failed to sign transaction: %v", err)
+	}
+
+	// Reserve the funds so a second call cannot spend them again.
+	if err := chain.Mempool.Add(newTx); err != nil {
+		return nil, err
+	}
 
 	return &newTx, nil
 
@@ -131,29 +151,116 @@ func (t *Transactions) Print() {
 	fmt.Printf("Timestamp:         %d\n", t.Timestamp)
 }
 
-func (t *Transactions) Hash() ([]byte) {
-	temp := *t
-	temp.Signature = nil // Exclude the signature becuase it is used only after hashing
-	m, _ := json.Marshal(temp)
-	hash := sha256.Sum256(m)
+// writeField length-prefixes a byte slice so that concatenation is injective.
+// Without the prefix, ("ab","c") and ("a","bc") would encode identically.
+func writeField(buf *bytes.Buffer, b []byte) {
+	var l [4]byte
+	binary.BigEndian.PutUint32(l[:], uint32(len(b)))
+	buf.Write(l[:])
+	buf.Write(b)
+}
+
+// canonicalBytes is the signed preimage of a transaction. It covers every
+// field that determines the transaction's meaning.
+//
+// The previous implementation hashed json.Marshal of a Transactions *value*.
+// Because MarshalJSON has a pointer receiver it was never invoked, so encoding
+// fell back to the struct tags -- and TxID, SenderHash, RecipientHash and
+// Signature are all tagged `json:"-"`. The signed preimage was therefore only
+// {"value":N,"timestamp":T}: the recipient was not committed to, and any two
+// transactions sharing a value and timestamp collided on TxID.
+func (t *Transactions) canonicalBytes() []byte {
+	var buf bytes.Buffer
+	buf.WriteByte(TX_VERSION)
+	writeField(&buf, t.SenderHash)
+	writeField(&buf, t.SenderPubKey)
+	writeField(&buf, t.RecipientHash)
+	_ = binary.Write(&buf, binary.BigEndian, t.Value)
+	_ = binary.Write(&buf, binary.BigEndian, t.Timestamp)
+	return buf.Bytes()
+}
+
+// Hash returns the transaction identifier: SHA-256 over the canonical preimage.
+// TxID and Signature are excluded -- TxID is this value, and the signature is
+// produced from it.
+func (t *Transactions) Hash() []byte {
+	hash := sha256.Sum256(t.canonicalBytes())
 	return hash[:]
 }
 
-func (t *Transactions) SignTransaction(wallet *wallet.Wallet) error {
-	r, s, err := ecdsa.Sign(rand.Reader, wallet.PrivateKey, t.Hash())
+func (t *Transactions) SignTransaction(w *wallet.Wallet) error {
+	if w == nil || w.PrivateKey == nil {
+		return errors.New("cannot sign with a nil wallet")
+	}
+	pubKeyBytes, err := wallet.PublicKeyToBytes(w.PublicKey)
 	if err != nil {
 		return err
 	}
-	t.Signature = append(r.Bytes(), s.Bytes()...)
+	// The public key is part of the signed preimage, so it must be set before
+	// the hash is computed.
+	t.SenderPubKey = pubKeyBytes
+	t.TxID = t.Hash()
+
+	r, s, err := ecdsa.Sign(rand.Reader, w.PrivateKey, t.TxID)
+	if err != nil {
+		return err
+	}
+	t.Signature = append(wallet.PadTo32(r), wallet.PadTo32(s)...)
 	return nil
 }
 
+// IsGenesis reports whether this is the genesis funding transaction, which by
+// construction carries no signature.
+func (t *Transactions) IsGenesis() bool {
+	return bytes.Equal(t.SenderHash, GENESIS_SENDER)
+}
+
+// Verify checks that the transaction is internally consistent and correctly
+// signed by the holder of the key its SenderHash commits to.
+//
+// It takes no public key argument: the key travels with the transaction and is
+// bound to SenderHash, so a caller cannot be tricked into verifying against an
+// attacker-supplied key.
+func (t *Transactions) Verify() error {
+	if t.IsGenesis() {
+		return nil
+	}
+	if len(t.SenderPubKey) == 0 {
+		return errors.New("transaction carries no sender public key")
+	}
+	if len(t.Signature) != 64 {
+		return fmt.Errorf("malformed signature: %d bytes, want 64", len(t.Signature))
+	}
+
+	pubKey, err := wallet.BytesToPublicKey(t.SenderPubKey)
+	if err != nil {
+		return fmt.Errorf("invalid sender public key: %v", err)
+	}
+
+	// Bind the key to the claimed sender, otherwise anyone could sign for anyone.
+	if !bytes.Equal(wallet.PublicKeyHashRipeMD160(pubKey), t.SenderHash) {
+		return errors.New("sender public key does not match sender hash")
+	}
+
+	expectedID := t.Hash()
+	if len(t.TxID) != 0 && !bytes.Equal(t.TxID, expectedID) {
+		return errors.New("transaction id does not match its contents")
+	}
+
+	r := new(big.Int).SetBytes(t.Signature[:32])
+	s := new(big.Int).SetBytes(t.Signature[32:])
+	if !ecdsa.Verify(pubKey, expectedID, r, s) {
+		return errors.New("signature verification failed")
+	}
+	return nil
+}
+
+// VerifyTransaction is retained for compatibility with existing callers.
+//
+// Deprecated: use Verify, which does not require the caller to supply -- and
+// therefore cannot be misled about -- the signing key.
 func (t *Transactions) VerifyTransaction(pubKey *ecdsa.PublicKey) bool {
-	r := new(big.Int).SetBytes(t.Signature[:len(t.Signature)/2])
-	s := new(big.Int).SetBytes(t.Signature[len(t.Signature)/2:])
-	hash := t.Hash()
-	fmt.Println([]byte(hash))
-	return ecdsa.Verify(pubKey, []byte(hash), r, s)
+	return t.Verify() == nil
 }
 
 

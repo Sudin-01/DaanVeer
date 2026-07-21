@@ -1,11 +1,10 @@
 package blockchain
 
 import (
-	// "fmt"
-	"errors"
+	"fmt"
 	"log"
 	"net"
-	// "strings"
+	"os"
 )
 
 func ShowError(err error) {
@@ -25,30 +24,51 @@ func getForwardSlashPosition(value string) int {
 }
 
 
-func GetNodeAddress() string {
+// NODE_ADDRESS_ENV overrides automatic node address detection.
+const NODE_ADDRESS_ENV = "DAANVEER_NODE_ADDRESS"
 
-	addresses, err := net.InterfaceAddrs()
-	if err != nil {
-		ShowError(err)
+// GetNodeAddress returns the IP this node advertises to peers.
+//
+// Set NODE_ADDRESS_ENV to pin it explicitly -- required when running several
+// nodes on one host, and for any reproducible multi-node experiment.
+//
+// Otherwise the first non-loopback IPv4 address of an interface that is up is
+// used. The previous implementation returned the first address beginning with
+// the literal string "192", which selected whichever 192.x interface the OS
+// happened to list first (often the gateway) and panicked outright on any
+// network not in 192.0.0.0/8 -- so it had to be hand-edited when moving
+// between home and campus networks.
+func GetNodeAddress() string {
+	if pinned := os.Getenv(NODE_ADDRESS_ENV); pinned != "" {
+		return pinned
 	}
 
-	for _, addr := range addresses {
-		addr_string := addr.String()
-		position := getForwardSlashPosition(addr_string)
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		log.Panic(err)
+	}
 
-		//this is for the college wifi network
-		// if strings.HasPrefix(addr_string, "172.16.1.31") {
-		// 	fmt.Println("Found address:", addr_string[:position])
-		// 	return addr_string[:position]
-
-		// } 
-		//this is for my home wifi network! Comment the following code while in college!!!
-		//Sudin has to slightly modify this
-		if addr_string[:3] == "192" {
-			return addr_string[:position]
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addresses {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipNet.IP.To4()
+			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+				continue
+			}
+			return ip.String()
 		}
 	}
-	err = errors.New("address not found")
-	log.Panic(err)
-	return ""
+
+	fmt.Printf("no routable IPv4 interface found; falling back to 127.0.0.1. Set %s to override.\n", NODE_ADDRESS_ENV)
+	return "127.0.0.1"
 }

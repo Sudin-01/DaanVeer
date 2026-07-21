@@ -1,11 +1,14 @@
 package blockchain
 
 import (
-	"fmt"
 	"bytes"
 	"errors"
+	"fmt"
+	"os"
+	"strconv"
+
+	"github.com/Sudin-01/DaanVeer/wallet"
 	"github.com/dgraph-io/badger/v4"
-	"github.com/Roshan310/DaanVeer/wallet"
 )
 
 const(
@@ -17,6 +20,10 @@ const(
 type BlockChain struct {
 	Database *badger.DB
 	LastHash []byte
+	// Mempool tracks admitted-but-unmined transactions and the funds they
+	// reserve, so a sender cannot spend the same committed balance twice
+	// before a block is produced.
+	Mempool *Mempool
 }
 
 type BlockChainIterator struct {
@@ -24,9 +31,55 @@ type BlockChainIterator struct {
 	Database    *badger.DB
 }
 
+// DB_PATH_ENV overrides the on-disk database location. Required when running
+// several nodes on one host, as every node otherwise opens ./db and BadgerDB
+// takes an exclusive lock on it.
+const DB_PATH_ENV = "DAANVEER_DB"
+
+// DatabasePath returns the configured database directory.
+func DatabasePath() string {
+	if path := os.Getenv(DB_PATH_ENV); path != "" {
+		return path
+	}
+	return DB_PATH
+}
+
 func InitBlockChain() *BlockChain {
+	return InitBlockChainAt(DatabasePath())
+}
+
+// VLOG_MB_ENV overrides the BadgerDB value-log file size, in megabytes.
+const VLOG_MB_ENV = "DAANVEER_VLOG_MB"
+
+// DEFAULT_VLOG_MB is the value-log size used when VLOG_MB_ENV is unset.
+//
+// BadgerDB defaults to a 1 GiB value log, which it memory-maps at twice that
+// size. For a ledger whose blocks are a few hundred bytes each that is wildly
+// oversized: it made running three nodes on one host fail outright with "not
+// enough space on the disk", and it would dominate any storage measurement
+// (E5) with preallocation rather than actual chain data.
+const DEFAULT_VLOG_MB = 64
+
+// BadgerOptions returns tuned database options for the given directory.
+func BadgerOptions(path string) badger.Options {
+	opts := badger.DefaultOptions(path)
+	if os.Getenv("DAANVEER_QUIET_DB") != "" {
+		opts.Logger = nil
+	}
+	sizeMB := int64(DEFAULT_VLOG_MB)
+	if raw := os.Getenv(VLOG_MB_ENV); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+			sizeMB = parsed
+		}
+	}
+	opts.ValueLogFileSize = sizeMB << 20
+	return opts
+}
+
+// InitBlockChainAt opens or creates a chain at an explicit location.
+func InitBlockChainAt(path string) *BlockChain {
 	var lastHash []byte
-	db, err := badger.Open(badger.DefaultOptions(DB_PATH))
+	db, err := badger.Open(BadgerOptions(path))
 	ShowError(err)
 
 	err = db.Update(func(txn *badger.Txn) error {
@@ -51,27 +104,31 @@ func InitBlockChain() *BlockChain {
 	})
 	ShowError(err)
 
-	return &BlockChain{Database: db, LastHash: lastHash}
+	return &BlockChain{Database: db, LastHash: lastHash, Mempool: NewMempool()}
 }
 
-func (blockchain *BlockChain) AddBlock(latestBlock *Block) error {
-	if !latestBlock.VerifyBlockHash() {
-		return errors.New("hash of the block doesnot match")
+// Close releases the database.
+func (blockchain *BlockChain) Close() error {
+	if blockchain == nil || blockchain.Database == nil {
+		return nil
 	}
-	if !latestBlock.VerifyProof() {
-		return errors.New("proof of work hasn't been done on the block")
-	}
-	fmt.Println("INSIDE Add block function now and proof is verified")
+	return blockchain.Database.Close()
+}
 
-	return blockchain.Database.Update(func(txn *badger.Txn) error {
-		latestBlockSerialized, err := latestBlock.SerializeBlockToGOB()
-		ShowError(err)
-		err = txn.Set(latestBlock.BlockHash, latestBlockSerialized)
-		ShowError(err)
-		err = txn.Set([]byte(LAST_BLOCK_HASH), latestBlock.BlockHash)
-		blockchain.LastHash = latestBlock.BlockHash
+// AddBlock validates a block and integrates it, extending the tip or
+// reorganising onto a longer branch as appropriate.
+//
+// Validation (hash, validator signature, and every transaction) happens inside
+// AcceptBlock. Nothing on this path previously verified transactions at all.
+func (blockchain *BlockChain) AddBlock(latestBlock *Block) error {
+	status, err := blockchain.AcceptBlock(latestBlock)
+	if err != nil {
 		return err
-	})
+	}
+	if status == StatusOrphan {
+		return ErrOrphanBlock
+	}
+	return nil
 }
 
 func (iter *BlockChainIterator) GetBlockAndIter() *Block {
@@ -245,23 +302,41 @@ func (chain *BlockChain) GetWalletBalance(address string) (uint64, error) {
 
 	iter := BlockChainIterator{CurrentHash: chain.LastHash, Database: chain.Database}
 	for block := iter.GetBlockAndIter(); block != nil; block = iter.GetBlockAndIter() {
-		if block.TxMerkleTree != nil {
-			for _, node := range block.TxMerkleTree.Nodes {
-				tx := node.Transaction
-				// fmt.Println("Inside the GetWalletBalance function, transaction list: ", tx)
-				// fmt.Println("Receipent hash: ", pubKeyHash)
-				if bytes.Equal(tx.SenderHash, []byte("GENESIS")) && bytes.Equal(tx.RecipientHash, pubKeyHash) {
+		// Iterate the block's transaction list. This previously walked
+		// TxMerkleTree.Nodes, which after construction holds only the root --
+		// so every block past the first transaction was silently ignored.
+		for _, tx := range block.Transactions() {
+			if tx.IsGenesis() {
+				if bytes.Equal(tx.RecipientHash, pubKeyHash) {
 					balance += tx.Value
-				} else {
-					if bytes.Equal(tx.SenderHash, pubKeyHash) {
-						balance -= tx.Value
-					}
-					if bytes.Equal(tx.RecipientHash, pubKeyHash) {
-						balance += tx.Value 
-					}
 				}
+				continue
+			}
+			if bytes.Equal(tx.SenderHash, pubKeyHash) {
+				balance -= tx.Value
+			}
+			if bytes.Equal(tx.RecipientHash, pubKeyHash) {
+				balance += tx.Value
 			}
 		}
 	}
 	return balance, nil
+}
+
+// SpendableBalance returns the committed balance less any funds already
+// reserved by unmined transactions in the mempool.
+func (chain *BlockChain) SpendableBalance(address string) (uint64, error) {
+	committed, err := chain.GetWalletBalance(address)
+	if err != nil {
+		return 0, err
+	}
+	pubKeyHash, err := wallet.PubKeyFromAddress(address)
+	if err != nil {
+		return 0, err
+	}
+	pending := chain.Mempool.PendingSpend(pubKeyHash)
+	if pending >= committed {
+		return 0, nil
+	}
+	return committed - pending, nil
 }

@@ -21,8 +21,24 @@ import (
 
 const (
 	CHECK_SUM_LENGTH = 4
-	ENCRYPTION_KEY   = "my-secure-32-byte-key" 
+	// WALLET_KEY_ENV names the environment variable holding the wallet-file
+	// encryption passphrase. It was previously a constant compiled into the
+	// binary and committed to version control, which made the encryption of
+	// wallet files decorative.
+	WALLET_KEY_ENV = "DAANVEER_WALLET_KEY"
 )
+
+// walletKey returns the wallet encryption passphrase, or an error if unset.
+func walletKey() (string, error) {
+	key := os.Getenv(WALLET_KEY_ENV)
+	if key == "" {
+		return "", fmt.Errorf("%s is not set; refusing to read or write wallet files with a default key", WALLET_KEY_ENV)
+	}
+	if len(key) < 16 {
+		return "", fmt.Errorf("%s must be at least 16 characters", WALLET_KEY_ENV)
+	}
+	return key, nil
+}
 
 type Wallet struct {
 	PrivateKey *ecdsa.PrivateKey
@@ -40,18 +56,44 @@ func (w *Wallet) GenerateKeyPair() error {
 	return nil
 }
 
+// COORDINATE_LENGTH is the fixed width of a P-256 field element in bytes.
+// Both public key coordinates are padded to this width so that serialization
+// is a bijection. See PadTo32.
+const COORDINATE_LENGTH = 32
+
+// PadTo32 left-pads a big-endian integer to 32 bytes.
+//
+// big.Int.Bytes() strips leading zero bytes, so a coordinate or signature
+// component smaller than 2^248 serializes short. Any scheme that recovers the
+// components by splitting a concatenation at len/2 then misaligns and silently
+// produces the wrong value. Fixed-width encoding removes the ambiguity.
+func PadTo32(i *big.Int) []byte {
+	b := i.Bytes()
+	if len(b) >= COORDINATE_LENGTH {
+		return b
+	}
+	out := make([]byte, COORDINATE_LENGTH)
+	copy(out[COORDINATE_LENGTH-len(b):], b)
+	return out
+}
+
 func PublicKeyToBytes(publicKey *ecdsa.PublicKey) ([]byte, error) {
-	return append(publicKey.X.Bytes(), publicKey.Y.Bytes()...), nil
+	if publicKey == nil || publicKey.X == nil || publicKey.Y == nil {
+		return nil, errors.New("nil public key")
+	}
+	out := make([]byte, 0, 2*COORDINATE_LENGTH)
+	out = append(out, PadTo32(publicKey.X)...)
+	out = append(out, PadTo32(publicKey.Y)...)
+	return out, nil
 }
 
 func BytesToPublicKey(pubKeyBytes []byte) (*ecdsa.PublicKey, error) {
 	curve := elliptic.P256()
-	keyLen := len(pubKeyBytes) / 2
-	if keyLen == 0 {
-		return nil, errors.New("invalid bytes of public key")
+	if len(pubKeyBytes) != 2*COORDINATE_LENGTH {
+		return nil, fmt.Errorf("invalid public key length %d, want %d", len(pubKeyBytes), 2*COORDINATE_LENGTH)
 	}
-	x := new(big.Int).SetBytes(pubKeyBytes[:keyLen])
-	y := new(big.Int).SetBytes(pubKeyBytes[keyLen:])
+	x := new(big.Int).SetBytes(pubKeyBytes[:COORDINATE_LENGTH])
+	y := new(big.Int).SetBytes(pubKeyBytes[COORDINATE_LENGTH:])
 
 	if !curve.IsOnCurve(x, y) {
 		return nil, errors.New("invalid points on the curve for this public key")
@@ -60,6 +102,11 @@ func BytesToPublicKey(pubKeyBytes []byte) (*ecdsa.PublicKey, error) {
 	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
 }
 
+// PublicKeyHashRipeMD160 returns RIPEMD-160(SHA-256(pubkey)), a 20-byte digest.
+//
+// The previous implementation constructed the RIPEMD-160 hasher, wrote to it,
+// then returned the intermediate SHA-256 digest and discarded the result --
+// yielding 32 bytes, not the documented 20.
 func PublicKeyHashRipeMD160(pubKey *ecdsa.PublicKey) []byte {
 	pubKeyBytes, err := PublicKeyToBytes(pubKey)
 	if err != nil {
@@ -67,8 +114,10 @@ func PublicKeyHashRipeMD160(pubKey *ecdsa.PublicKey) []byte {
 	}
 	pubKeyHash := sha256.Sum256(pubKeyBytes)
 	ripeMDHasher := ripemd160.New()
-	_, _ = ripeMDHasher.Write(pubKeyHash[:])
-	return pubKeyHash[:]
+	if _, err := ripeMDHasher.Write(pubKeyHash[:]); err != nil {
+		return nil
+	}
+	return ripeMDHasher.Sum(nil)
 }
 
 func GenerateAddress(publicKey *ecdsa.PublicKey) string {
@@ -142,8 +191,13 @@ func (w *Wallet) SaveToFile(fileName string) error {
 		w.Address,
 	)
 
+	key, err := walletKey()
+	if err != nil {
+		return err
+	}
+
 	// Encrypt data
-	encryptedData, err := encrypt(data, ENCRYPTION_KEY)
+	encryptedData, err := encrypt(data, key)
 	if err != nil {
 		return err
 	}
@@ -167,13 +221,18 @@ func LoadAllWallets(fileName string) ([]*Wallet, error) {
 		return nil, err
 	}
 
+	key, err := walletKey()
+	if err != nil {
+		return nil, err
+	}
+
 	// Split the file into encrypted wallet blocks
 	encryptedBlocks := strings.Split(strings.TrimSpace(string(data)), "\n\n")
 
 	var wallets []*Wallet
 	for _, block := range encryptedBlocks {
 		// Decrypt the wallet block
-		decryptedData, err := decrypt(block, ENCRYPTION_KEY)
+		decryptedData, err := decrypt(block, key)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decrypt wallet: %v", err)
 		}

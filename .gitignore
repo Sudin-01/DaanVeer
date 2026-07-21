@@ -1,6 +1,24 @@
 # to remove already tracked files from git
 # git rm --cached my_wallet.txt
 
+# wallets and keys -- never commit
 my_wallet.txt
+*wallet*.txt
+validator.txt
+
+# chain state
+db/
+*.vlog
+*.sst
+
+# generated chain configuration (per-deployment; use -init to create)
+config/chain.json
+
+# local testbed state
+experiments/.testbed/
+
+# build artefacts
+*.exe
+daanveer
+
 test.txt
-db

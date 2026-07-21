@@ -9,18 +9,19 @@ package communication
 import (
 	"bytes"
 	"encoding/gob"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 
-	"github.com/Roshan310/DaanVeer/blockchain"
-	"github.com/Roshan310/DaanVeer/wallet"
+	"github.com/Sudin-01/DaanVeer/blockchain"
+	"github.com/Sudin-01/DaanVeer/wallet"
 )
 
 
@@ -39,7 +40,6 @@ var (
 	KnownNodes  = []string{} 
 	nodeAddress string       
 
-	MemoryPool      = make(map[string]blockchain.Transactions)
 	blocksInTransit [][]byte
 )
 
@@ -136,7 +136,8 @@ func sendData(addr string, data []byte) {
 	_, err = io.Copy(conn, bytes.NewReader(data))
 
 	if err != nil {
-		log.Panic(err)
+		// A write failure to one peer must not take this node down.
+		fmt.Printf("failed to send to %s: %v\n", addr, err)
 	}
 }
 
@@ -224,16 +225,32 @@ func sendInv(addr string, kind MESSAGE_TYPE, inventories [][]byte) {
 	sendData(addr, data)
 }
 
+// frameBody strips the command header from a peer frame, reporting false when
+// the frame is too short to contain one. Slicing request[commandLength:]
+// unguarded panics on a short frame, which any peer can send.
+func frameBody(request []byte) ([]byte, bool) {
+	if len(request) < commandLength {
+		return nil, false
+	}
+	return request[commandLength:], true
+}
+
 func HandleAddress(request []byte, chain *blockchain.BlockChain) {
 	var buff bytes.Buffer
 	var payload Address
 
-	buff.Write(request[commandLength:])
+	body, ok := frameBody(request)
+	if !ok {
+		fmt.Println("discarding short peer message")
+		return
+	}
+	buff.Write(body)
 	dec := gob.NewDecoder(&buff)
 	err := dec.Decode(&payload)
 
 	if err != nil {
-		log.Panic(err)
+		fmt.Println("discarding malformed peer message:", err)
+		return
 	}
 
 	KnownNodes = append(KnownNodes, payload.AddrList...)
@@ -243,43 +260,49 @@ func HandleAddress(request []byte, chain *blockchain.BlockChain) {
 	}
 }
 
+// HandleBlock integrates a block received from a peer.
+//
+// A block that does not extend the local tip is now resolved by fork choice.
+// Previously this called os.Exit(69), so any fork -- or simply an out-of-order
+// delivery -- terminated the node. Recovery therefore required a restart,
+// which is the most likely explanation for the 40-50 s "block propagation
+// delay" reported in the minor project: what was measured was restart-driven
+// resynchronisation, not propagation.
 func HandleBlock(request []byte, bChain *blockchain.BlockChain) {
 	var buff bytes.Buffer
 	var payload Block
 
-	buff.Write(request[commandLength:])
-	err := gob.NewDecoder(&buff).Decode(&payload)
-
-	if err != nil {
-		log.Panic(err)
+	body, ok := frameBody(request)
+	if !ok {
+		fmt.Println("discarding short peer message")
+		return
+	}
+	buff.Write(body)
+	if err := gob.NewDecoder(&buff).Decode(&payload); err != nil {
+		fmt.Println("discarding malformed block message:", err)
+		return
 	}
 
-	fmt.Printf("Received a block of hash: %x\n", payload.Block.BlockHash)
-
-	blockHashes := bChain.GetBlockHashesFromHeight(payload.Block.Height - 1)
-	fmt.Println("Block 0 hash: ", bChain.GetBlockHashesFromHeight(1))
-	fmt.Println("Payload blockHashes: ", blockHashes)
-	fmt.Println("Payload block height: ", payload.Block.Height)
-
-	if len(blockHashes) != 0 {
-		lastHash := blockHashes[len(blockHashes)-1]
-		fmt.Println("Payload previous hash: \n", payload.Block.PreviousHash)
-		fmt.Println("Last hash: ", lastHash)
-
-		if !bytes.Equal(payload.Block.PreviousHash, lastHash) {
-			log.Printf("Chain of this node invalid at height: %d", payload.Block.Height-1)
-			os.Exit(69)
-			blocksInTransit = [][]byte{} // empty blocks in transit
-		}
+	status, err := bChain.AcceptBlock(&payload.Block)
+	switch {
+	case errors.Is(err, blockchain.ErrOrphanBlock):
+		// Ancestors are missing: ask the sender for the chain leading here.
+		fmt.Printf("block %x is an orphan; requesting ancestors from %s\n",
+			payload.Block.BlockHash, payload.AddrFrom)
+		SendGetBlocks(payload.AddrFrom, bChain)
+		return
+	case err != nil:
+		fmt.Printf("rejected block %x from %s: %v\n",
+			payload.Block.BlockHash, payload.AddrFrom, err)
+		return
 	}
 
-	bChain.AddBlock(&payload.Block)
+	fmt.Printf("block %x accepted (%s), height now %d\n",
+		payload.Block.BlockHash, status, bChain.GetHeight())
 
 	mutex.Lock()
 	defer mutex.Unlock()
-	fmt.Printf("blocks in transit before check: %v (length: %d)\n", blocksInTransit, len(blocksInTransit))
 	if len(blocksInTransit) > 0 {
-		fmt.Println("Processing Blocks in Transit: ", blocksInTransit)
 		blockHash := blocksInTransit[0]
 		sendGetData(payload.AddrFrom, BLOCK_TYPE, blockHash)
 		blocksInTransit = blocksInTransit[1:]
@@ -291,11 +314,17 @@ func HandleGetBlocks(request []byte, chain *blockchain.BlockChain) {
 	var buff bytes.Buffer
 	var payload GetBlocks
 
-	buff.Write(request[commandLength:])
+	body, ok := frameBody(request)
+	if !ok {
+		fmt.Println("discarding short peer message")
+		return
+	}
+	buff.Write(body)
 	err := gob.NewDecoder(&buff).Decode(&payload)
 
 	if err != nil {
-		log.Panic(err)
+		fmt.Println("discarding malformed peer message:", err)
+		return
 	}
 
 	blocks := chain.GetBlockHashes(payload.Data)
@@ -307,18 +336,23 @@ func HandleGetData(request []byte, chain *blockchain.BlockChain) {
 	var buff bytes.Buffer
 	var payload GetData
 
-	buff.Write(request[commandLength:])
+	body, ok := frameBody(request)
+	if !ok {
+		fmt.Println("discarding short peer message")
+		return
+	}
+	buff.Write(body)
 	err := gob.NewDecoder(&buff).Decode(&payload)
 
 	if err != nil {
-		log.Panic(err)
+		fmt.Println("discarding malformed peer message:", err)
+		return
 	}
 
 	if payload.Type == BLOCK_TYPE {
-		block, err := chain.GetBlock([]byte(payload.Data))
-
+		block, err := chain.BlockByHash(payload.Data)
 		if err != nil {
-			log.Panic(err)
+			fmt.Printf("peer %s requested unknown block %x\n", payload.AddrFrom, payload.Data)
 			return
 		}
 
@@ -326,9 +360,11 @@ func HandleGetData(request []byte, chain *blockchain.BlockChain) {
 	}
 
 	if payload.Type == TX_TYPE {
-		txId := hex.EncodeToString(payload.Data)
-		tx := MemoryPool[txId]
-
+		tx, found := chain.Mempool.Get(payload.Data)
+		if !found {
+			fmt.Printf("peer %s requested unknown transaction %x\n", payload.AddrFrom, payload.Data)
+			return
+		}
 		SendTx(payload.AddrFrom, tx)
 	}
 }
@@ -337,11 +373,17 @@ func HandleVersion(request []byte, chain *blockchain.BlockChain) {
 	var buff bytes.Buffer
 	var payload Version
 
-	buff.Write(request[commandLength:])
+	body, ok := frameBody(request)
+	if !ok {
+		fmt.Println("discarding short peer message")
+		return
+	}
+	buff.Write(body)
 	err := gob.NewDecoder(&buff).Decode(&payload)
 
 	if err != nil {
-		log.Panic(err)
+		fmt.Println("discarding malformed peer message:", err)
+		return
 	}
 
 	// height on the current chain
@@ -370,11 +412,17 @@ func HandleTx(request []byte, chain *blockchain.BlockChain, wlt *wallet.Wallet) 
 	var buff bytes.Buffer
 	var payload Tx
 
-	buff.Write(request[commandLength:])
+	body, ok := frameBody(request)
+	if !ok {
+		fmt.Println("discarding short peer message")
+		return
+	}
+	buff.Write(body)
 	err := gob.NewDecoder(&buff).Decode(&payload)
 
 	if err != nil {
-		log.Panic(err)
+		fmt.Println("discarding malformed peer message:", err)
+		return
 	}
 
 	tx, err := blockchain.DeserializeTxFromGOB(payload.Transaction)
@@ -383,53 +431,41 @@ func HandleTx(request []byte, chain *blockchain.BlockChain, wlt *wallet.Wallet) 
 		return
 	}
 
-	txHash:= tx.Hash()
-	MemoryPool[hex.EncodeToString(txHash)] = *tx
-	fmt.Println("Transaction received and stored in MemoryPool:")
-    for id, _ := range MemoryPool {
-        fmt.Println("TxID:", id)
-    }
+	// Admit into the chain's mempool, which verifies the signature and rejects
+	// duplicates. A peer previously wrote straight into a package-level map
+	// with no verification at all, so any peer could inject arbitrary
+	// transactions into this node's pending set.
+	if err := chain.Mempool.Add(*tx); err != nil {
+		fmt.Printf("rejected transaction from %s: %v\n", payload.AddrFrom, err)
+		return
+	}
+	txHash := tx.TxID
+	fmt.Printf("Transaction %x admitted to mempool (%d pending)\n", txHash, chain.Mempool.Len())
 
-	if nodeAddress == KnownNodes[0] {
+	if isBootstrapNode() {
 		for _, node := range KnownNodes {
 			if node != nodeAddress && node != payload.AddrFrom {
 				sendInv(node, TX_TYPE, [][]byte{txHash})
 			}
 		}
-	} else {
-		if len(MemoryPool) >= 2 {
-			// txPool := []blockchain.Tx{}
-
-			// for _, tx := range MemoryPool {
-			// 	txPool = append(txPool, tx)
-			// }
-
-			// block := blockchain.CreateBlock()
-			// block.AddTransactionsToBlock(txPool)
-			// err := block.MineBlock(chain, wlt)
-			// utility.ErrThenLogPanic(err)
-			// chain.AddBlock(block)
-
-			// for _, nodes := range KnownNodes {
-			// 	SendBlock(nodes, block)
-			// }
-
-			// // empty memory pool
-			// MemoryPool = map[string]blockchain.Tx{}
-		}
 	}
 }
 
-func HandleInv(request []byte) {
-	buff := bytes.NewBuffer(request[commandLength:])
+func HandleInv(request []byte, chain *blockchain.BlockChain) {
 	var payload Inv
 
-	buff.Write(request[commandLength:])
+	body, ok := frameBody(request)
+	if !ok {
+		fmt.Println("discarding short peer message")
+		return
+	}
+	buff := bytes.NewBuffer(body)
 	dec := gob.NewDecoder(buff)
 	err := dec.Decode(&payload)
 
 	if err != nil {
-		log.Panic(err)
+		fmt.Println("discarding malformed peer message:", err)
+		return
 	}
 
 	typeStringMap := map[MESSAGE_TYPE]string{
@@ -466,10 +502,12 @@ func HandleInv(request []byte) {
 	}
 
 	if payload.Type == TX_TYPE {
+		if len(payload.Data) == 0 {
+			return
+		}
 		txID := payload.Data[0]
-		tx := MemoryPool[hex.EncodeToString(txID)]
-		txByte, _ := tx.SerializeTxToGOB()
-		if txByte == nil {
+		// Request the transaction only if this node does not already hold it.
+		if _, found := chain.Mempool.Get(txID); !found {
 			sendGetData(payload.AddrFrom, TX_TYPE, txID)
 		}
 	}
@@ -482,7 +520,14 @@ func HandleConnection(conn net.Conn, chain *blockchain.BlockChain, wlt *wallet.W
 
 	defer conn.Close()
 	if err != nil {
-		log.Panic(err)
+		fmt.Println("failed to read from peer:", err)
+		return
+	}
+	// A short frame cannot carry a command; reject rather than slicing past
+	// the end of the buffer.
+	if len(req) < commandLength {
+		fmt.Printf("discarding short message from peer (%d bytes)\n", len(req))
+		return
 	}
 
 	command := BytesToCommand(req[:12])
@@ -494,7 +539,7 @@ func HandleConnection(conn net.Conn, chain *blockchain.BlockChain, wlt *wallet.W
 
 	case "inv":
 		fmt.Println("Receiving inventory")
-		HandleInv(req)
+		HandleInv(req, chain)
 
 	case "getversion":
 		fmt.Println("Sending version")
@@ -535,47 +580,84 @@ func contains(array []string, val string) bool {
 func GobEncode(data interface{}) []byte {
 	var buff bytes.Buffer
 
-	err := gob.NewEncoder(&buff).Encode(data)
-
-	if err != nil {
-		log.Panic(err)
+	if err := gob.NewEncoder(&buff).Encode(data); err != nil {
+		// Encoding our own outbound message should never fail; if it does the
+		// caller sends nothing rather than the node dying.
+		fmt.Println("failed to encode outbound message:", err)
+		return nil
 	}
 
 	return buff.Bytes()
 }
 
-func readKnownNodesFromJSON() {
-	knownNodesByte, err := os.ReadFile("./communication/knownNodes.json")
-	blockchain.ShowError(err)
+// PEERS_PATH_ENV overrides the location of the peer list.
+const PEERS_PATH_ENV = "DAANVEER_PEERS"
 
-	var payload map[string]interface{}
+// DefaultPeersPath is the peer list location used when PEERS_PATH_ENV is unset.
+var DefaultPeersPath = filepath.Join("config", "knownNodes.json")
+
+type peersFile struct {
+	Nodes []string `json:"nodes"`
+}
+
+// readKnownNodesFromJSON loads the peer list.
+//
+// A missing or malformed peer list is not fatal: a node with no peers is a
+// valid single-node network, and it must still serve its API. This previously
+// called log.Fatal via ShowError, so running the binary from any directory
+// other than the repository root killed the process at startup. The unchecked
+// map type assertions also panicked on malformed input.
+func readKnownNodesFromJSON() {
+	path := os.Getenv(PEERS_PATH_ENV)
+	if path == "" {
+		path = DefaultPeersPath
+	}
 
 	KnownNodes = []string{}
 
-	err = json.Unmarshal(knownNodesByte, &payload)
-	blockchain.ShowError(err)
-
-	knownNodesList := payload["nodes"].([]interface{})
-
-	for _, node := range knownNodesList {
-		KnownNodes = append(KnownNodes, node.(string))
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("no peer list at %s (%v); starting as a single-node network\n", path, err)
+		return
 	}
+
+	var payload peersFile
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		fmt.Printf("peer list %s is malformed (%v); starting as a single-node network\n", path, err)
+		return
+	}
+
+	for _, node := range payload.Nodes {
+		if node != "" {
+			KnownNodes = append(KnownNodes, node)
+		}
+	}
+	fmt.Printf("loaded %d known peer(s) from %s\n", len(KnownNodes), path)
+}
+
+// isBootstrapNode reports whether this node is first in the peer list.
+//
+// The peer list's first entry acts as an implicit coordinator for transaction
+// relay. That is a fragile arrangement -- membership depends on file ordering
+// -- and is slated for replacement by the proposer schedule in C1.
+func isBootstrapNode() bool {
+	return len(KnownNodes) > 0 && nodeAddress == KnownNodes[0]
 }
 
 func StartServer(nodeId string, chain *blockchain.BlockChain, wlt *wallet.Wallet) {
-	fmt.Println("p2p server started at port: ", nodeId)
 	nodeAddress = fmt.Sprintf("%s:%s", blockchain.GetNodeAddress(), nodeId)
-	fmt.Println("Node address: ", nodeAddress)
-	// minerAddress = minerAddress
-	ln, err := net.Listen(protocol, nodeAddress)
+	fmt.Println("p2p node address: ", nodeAddress)
 
 	readKnownNodesFromJSON()
 
+	ln, err := net.Listen(protocol, nodeAddress)
 	if err != nil {
-		log.Panic(err)
+		fmt.Printf("p2p listener failed on %s: %v; this node will not participate in the network\n", nodeAddress, err)
+		return
 	}
 	defer ln.Close()
-	if nodeAddress != KnownNodes[0] {
+
+	if !isBootstrapNode() {
 		for _, node := range KnownNodes {
 			if node != nodeAddress {
 				SendVersion(node, chain)
@@ -583,13 +665,13 @@ func StartServer(nodeId string, chain *blockchain.BlockChain, wlt *wallet.Wallet
 		}
 	}
 
-	// chain.PrintChain()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Panic(err)
+			// A failed accept must not take the node down.
+			fmt.Println("p2p accept error:", err)
+			continue
 		}
 		go HandleConnection(conn, chain, wlt)
-
 	}
 }

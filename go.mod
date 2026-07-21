@@ -5,7 +5,6 @@ go 1.23.4
 require golang.org/x/crypto v0.33.0
 
 require (
-	github.com/Roshan310/DaanVeer v0.0.0-20250228143822-91522bc37625
 	github.com/dgraph-io/badger/v4 v4.5.1
 	github.com/gin-gonic/gin v1.10.0
 	github.com/mr-tron/base58 v1.2.0

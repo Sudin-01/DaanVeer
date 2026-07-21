@@ -1,54 +1,121 @@
 package main
 
 import (
-	// "encoding/json"
-	// "fmt"
-	// "log"
+	"flag"
 	"fmt"
+	"log"
+	"os"
 
-	"github.com/Roshan310/DaanVeer/api"
-	"github.com/Roshan310/DaanVeer/blockchain"
-	"github.com/Roshan310/DaanVeer/wallet"
+	"github.com/Sudin-01/DaanVeer/api"
+	"github.com/Sudin-01/DaanVeer/blockchain"
+	"github.com/Sudin-01/DaanVeer/wallet"
 )
-// Test for Wallet
-// func main() {
-// 	// Specify the filename to save the wallet.
-// 	walletFile := "my_wallet.txt"
-
-// 	// Generate a new wallet and save it to the file.
-// 	myWallet, err := wallet.GenerateWallet(walletFile)
-// 	if err != nil {
-// 		log.Fatalf("Failed to generate wallet: %v\n", err)
-// 	}
-
-// 	// Display the newly generated wallet information.
-// 	fmt.Println("New Wallet:")
-// 	fmt.Println("Wallet Address:", myWallet.Address)
-// 	fmt.Printf("Public Key: %x\n", wallet.PublicKeyToBytes(myWallet.PublicKey))
-// 	fmt.Printf("Private Key: %x\n", myWallet.PrivateKey.D.Bytes())
-
-// 	// Load all wallets from the file.
-// 	wallets, err := wallet.LoadAllWallets(walletFile)
-// 	if err != nil {
-// 		log.Fatalf("Failed to load wallets: %v\n", err)
-// 	}
-
-// 	// Display all loaded wallets.
-// 	fmt.Println("\nLoaded Wallets:")
-// 	for i, w := range wallets {
-// 		fmt.Printf("Wallet %d:\n", i+1)
-// 		fmt.Println("Wallet Address:", w.Address)
-// 		fmt.Printf("Public Key: %x\n", wallet.PublicKeyToBytes(w.PublicKey))
-// 		fmt.Printf("Private Key: %x\n\n", w.PrivateKey.D.Bytes())
-// 	}
-// }
 
 func main() {
-	chain := blockchain.InitBlockChain()
-	wlt, err := wallet.GenerateWallet("my_wallet.txt")
-	blockchain.ShowError(err)
-	// chain.PrintChain()
-	fmt.Println("Starting server at port: ", api.PORT)
-	api.StartServer(wlt, chain, api.PORT)
+	var (
+		initChain  = flag.Bool("init", false, "generate a wallet and a fresh chain configuration, then exit")
+		addValidator = flag.Bool("add-validator", false, "add this node's wallet to an existing chain configuration, then exit")
+		configPath = flag.String("config", blockchain.CHAIN_CONFIG, "path to the chain configuration")
+		walletPath = flag.String("wallet", "my_wallet.txt", "path to the wallet file")
+		dbPath     = flag.String("db", "", "path to the block database (default: $DAANVEER_DB or ./db)")
+		port       = flag.String("port", api.PORT, "port to serve the HTTP API and p2p listener on")
+	)
+	flag.Parse()
+
+	if *dbPath == "" {
+		*dbPath = blockchain.DatabasePath()
+	}
+
+	switch {
+	case *initChain:
+		if err := bootstrap(*configPath, *walletPath); err != nil {
+			log.Fatalf("init failed: %v", err)
+		}
+		return
+	case *addValidator:
+		if err := addValidatorToConfig(*configPath, *walletPath); err != nil {
+			log.Fatalf("add-validator failed: %v", err)
+		}
+		return
+	}
+
+	if err := blockchain.LoadChainConfig(*configPath); err != nil {
+		log.Fatalf("could not load chain configuration: %v\n\nRun `%s -init` to create one.", err, os.Args[0])
+	}
+
+	wlt, err := wallet.GenerateWallet(*walletPath)
+	if err != nil {
+		log.Fatalf("could not load wallet: %v", err)
+	}
+
+	chain := blockchain.InitBlockChainAt(*dbPath)
+	defer chain.Close()
+
+	if _, authorized := blockchain.LookupValidator(wlt.Address); authorized {
+		fmt.Println("This node is an authorized validator.")
+	} else {
+		fmt.Println("This node is NOT a validator; it can submit transactions but not mine.")
+	}
+
+	fmt.Printf("node %s starting on port %s (db %s)\n", wlt.Address, *port, *dbPath)
+	api.StartServer(wlt, chain, *port)
 }
 
+// bootstrap creates a wallet and a chain configuration in which that wallet is
+// both the genesis recipient and the sole authorised validator.
+func bootstrap(configPath, walletPath string) error {
+	if _, err := os.Stat(configPath); err == nil {
+		return fmt.Errorf("%s already exists; delete it (and the database) to re-initialise", configPath)
+	}
+
+	wlt, err := wallet.GenerateWallet(walletPath)
+	if err != nil {
+		return err
+	}
+
+	cfg, err := blockchain.NewSingleValidatorConfig(
+		wlt,
+		blockchain.DEFAULT_GENESIS_AMOUNT,
+		blockchain.DEFAULT_GENESIS_TIMESTAMP,
+	)
+	if err != nil {
+		return err
+	}
+	if err := blockchain.SaveChainConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("\nWrote %s\n", configPath)
+	fmt.Printf("  genesis address : %s\n", cfg.GenesisAddress)
+	fmt.Printf("  genesis amount  : %d\n", cfg.GenesisAmount)
+	fmt.Printf("  validators      : %d\n", len(cfg.Validators))
+	fmt.Printf("\nWallet saved to %s.\n", walletPath)
+	return nil
+}
+
+// addValidatorToConfig appends this node's wallet to an existing chain
+// configuration, so a multi-validator network can be assembled from several
+// independently generated wallets.
+func addValidatorToConfig(configPath, walletPath string) error {
+	if err := blockchain.LoadChainConfig(configPath); err != nil {
+		return err
+	}
+	cfg, err := blockchain.ActiveConfig()
+	if err != nil {
+		return err
+	}
+
+	wlt, err := wallet.GenerateWallet(walletPath)
+	if err != nil {
+		return err
+	}
+	if err := cfg.AddValidator(wlt.PublicKey); err != nil {
+		return err
+	}
+	if err := blockchain.SaveChainConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("added validator %s to %s (%d total)\n", wlt.Address, configPath, len(cfg.Validators))
+	return nil
+}

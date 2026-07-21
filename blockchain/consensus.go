@@ -3,119 +3,113 @@ package blockchain
 import (
 	"crypto/ecdsa"
 	"crypto/rand"
-	// "crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 
-	"github.com/Roshan310/DaanVeer/wallet"
+	"github.com/Sudin-01/DaanVeer/wallet"
 )
+
 type Validator struct {
-	PublicKey *ecdsa.PublicKey
-	Address   string
+	PublicKey  *ecdsa.PublicKey
+	Address    string
 	authorized bool
 }
 
-// Validators map now stores validator address and public key
-var Validators = map[string]Validator{}
+// Authorized reports whether this validator may sign blocks.
+func (v Validator) Authorized() bool { return v.authorized }
 
-func init() {
-	authorityAddress := "25ayHZZTtyoMzhNSYwP9ivjpvWABqJw6uhQ9AHoY7eWo1Cb8jT"
-	authorityPubKeyHex := "fb5be55e3b3efa104ee8d2c55407c811af6187681ddcec3de266d39ab8909d80c8fdb4fe2ce1b6c7c6a85f23454e50acdba8f2d4bef022759b6cadee13b6a9de"
+var (
+	validatorMu sync.RWMutex
+	// Validators is the authorised validator set, keyed by address.
+	//
+	// It is populated only from configuration. Nothing on the mining path may
+	// write to it: a node previously inserted itself here before its
+	// authorisation was checked, so a rejected miner still became a validator.
+	Validators = map[string]Validator{}
+)
 
-	pubKeyBytes, err := hex.DecodeString(authorityPubKeyHex)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to decode public key: %v", err))
+// SetValidators replaces the validator set. Called by SetConfig; also used
+// directly by tests.
+func SetValidators(pubKeys []*ecdsa.PublicKey) {
+	next := make(map[string]Validator, len(pubKeys))
+	for _, pk := range pubKeys {
+		address := wallet.GenerateAddress(pk)
+		next[address] = Validator{PublicKey: pk, Address: address, authorized: true}
 	}
-	
-	pubKey, err := wallet.BytesToPublicKey(pubKeyBytes)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to convert bytes to public key: %v", err))
-	}
-
-	Validators[authorityAddress] = Validator{
-		PublicKey: pubKey,
-		Address:   authorityAddress,
-		authorized: true,
-	}
-
-	fmt.Println("Authority added sucessfully")
+	validatorMu.Lock()
+	defer validatorMu.Unlock()
+	Validators = next
 }
 
+// LookupValidator returns the validator registered at the given address.
+func LookupValidator(address string) (Validator, bool) {
+	validatorMu.RLock()
+	defer validatorMu.RUnlock()
+	v, ok := Validators[address]
+	return v, ok
+}
 
+// ValidatorCount returns the size of the authorised validator set.
+func ValidatorCount() int {
+	validatorMu.RLock()
+	defer validatorMu.RUnlock()
+	return len(Validators)
+}
+
+// VerifyProof checks that the block was signed by an authorised validator over
+// this block's own hash.
 func (blk *Block) VerifyProof() bool {
-	
-	//Need to debug this quite hard
-	//This will only work if VerifyHash() (inside the block.go) works
-	//It's finally working! YEAH!!
-	// return true
-	fmt.Println("About to verify the proof of block")
-	fmt.Println("    ")
-	validatorAddr := string(blk.ValidatorAddress)
-	// fmt.Println("Validator Address while verifying proof: ", validatorAddr)
-
-	// // Make sure that the validator is in the list of authorized validator
-	validator, exists := Validators[validatorAddr]
-	if !exists {
-		fmt.Println("Block rejected: Validator is not authorized.")
+	validator, exists := LookupValidator(string(blk.ValidatorAddress))
+	if !exists || !validator.authorized {
+		fmt.Println("Block rejected: validator is not authorized.")
 		return false
 	}
 
 	signatureBytes, err := hex.DecodeString(blk.Signature)
 	if err != nil {
-		fmt.Println("Invalid block signature:", err)
+		fmt.Println("Block rejected: invalid signature encoding:", err)
 		return false
 	}
-	// // Extract r and s values from the signature
-	r := new(big.Int).SetBytes(signatureBytes[:len(signatureBytes)/2])
-	s := new(big.Int).SetBytes(signatureBytes[len(signatureBytes)/2:])
-
-	blockHash := blk.Hash()
-
-	// fmt.Println("Block Hash inside verify proof: ", blockHash)
-	// // Verify the signature using the validator's public key
-	// fmt.Println("Validator public key: ", validator.PublicKey)
-	if ecdsa.Verify(validator.PublicKey, blockHash[:], r, s) {
-		fmt.Println("Block verified successfully.")
-		return true
-	} else {
-		fmt.Println("Block signature verification failed.")
+	if len(signatureBytes) != 64 {
+		fmt.Printf("Block rejected: malformed signature (%d bytes, want 64)\n", len(signatureBytes))
 		return false
 	}
+
+	// Fixed-width halves. Splitting at len/2 over a variable-width encoding
+	// misaligns whenever r or s has a stripped leading zero byte.
+	r := new(big.Int).SetBytes(signatureBytes[:32])
+	s := new(big.Int).SetBytes(signatureBytes[32:])
+
+	if !ecdsa.Verify(validator.PublicKey, blk.Hash(), r, s) {
+		fmt.Println("Block rejected: signature verification failed.")
+		return false
+	}
+	return true
 }
 
-// ProofOfAuthority signs the block using an authorized validator's private key
+// ProofOfAuthority signs a block with an authorised validator's private key.
 func ProofOfAuthority(blk *Block, validatorWallet *wallet.Wallet) error {
-	validatorAddr := string(validatorWallet.Address)
+	if validatorWallet == nil || validatorWallet.PrivateKey == nil {
+		return errors.New("cannot sign without a validator wallet")
+	}
+	validatorAddr := validatorWallet.Address
 
-	if validatorAddr != ("25ayHZZTtyoMzhNSYwP9ivjpvWABqJw6uhQ9AHoY7eWo1Cb8jT") {
+	// Authorisation is decided solely by the configured set. There is no
+	// hardcoded address, and no self-registration.
+	if _, exists := LookupValidator(validatorAddr); !exists {
 		return errors.New("you are not authorized to mine the block")
 	}
 
-	// Ensure validator is authorized
-	_, exists := Validators[string(validatorAddr)]
-	if !exists{
-		return errors.New("validator is not authorized")
-	}
-	fmt.Println("Validator is authorized.")
 	blk.ValidatorAddress = []byte(validatorAddr)
 	blockHash := blk.Hash()
-	// fmt.Println("Block Hash inside PoA function: ", blockHash)
-	// hashBytes := sha256.Sum256(blockHash)
 
-	// Sign the block using the validator's private key
-	r, s, err := ecdsa.Sign(rand.Reader, validatorWallet.PrivateKey, blockHash[:])
+	r, s, err := ecdsa.Sign(rand.Reader, validatorWallet.PrivateKey, blockHash)
 	if err != nil {
 		return err
 	}
-
-	// Encode the signature
-	signature := append(r.Bytes(), s.Bytes()...)
-	blk.Signature = hex.EncodeToString(signature)
-
-	// fmt.Println("Validator Address inside the PoA function: ", string(blk.ValidatorAddress))
-	// fmt.Println("Validator Address expected: ", validatorWallet.Address)
-
+	blk.Signature = hex.EncodeToString(append(wallet.PadTo32(r), wallet.PadTo32(s)...))
 	return nil
 }

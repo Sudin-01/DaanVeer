@@ -3,26 +3,31 @@ package blockchain
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
 	// "encoding/hex"
 
-	"github.com/Roshan310/DaanVeer/wallet"
+	"github.com/Sudin-01/DaanVeer/wallet"
 	"github.com/dgraph-io/badger/v4"
 )
 const (
 	GENESIS_STRING = "THIS IS THE FIRST BLOCK"
-	GENESIS_TIMESTAMP = 1646919219
-	GENESIS_AMOUNT = 1000
-	//genesis address is my wallet address which will have amount of 1000 initially
-	GENESIS_ADDRESS = "5Dv7dCeuvoLntY5QueBDsConyi1hckMVjdLCeg6kdeeC6wE8G"
+	// DEFAULT_GENESIS_TIMESTAMP is used when bootstrapping a fresh config.
+	DEFAULT_GENESIS_TIMESTAMP = 1646919219
+	// DEFAULT_GENESIS_AMOUNT is the initial grant written into a fresh config.
+	DEFAULT_GENESIS_AMOUNT = 1000
 )
 func init() {
 	log.SetPrefix("Blockchain: ")
 }
+
+// BLOCK_VERSION prefixes the canonical block preimage.
+const BLOCK_VERSION byte = 2
 
 type Block struct {
 	PreviousHash []byte
@@ -32,6 +37,32 @@ type Block struct {
 	Signature	string
 	ValidatorAddress []byte
 	TxMerkleTree *MerkleTree
+
+	// Txs is the authoritative, ordered transaction list for this block.
+	//
+	// Transactions were previously recovered by walking TxMerkleTree.Nodes,
+	// but NewMerkleTree assigns Nodes the final level of the tree -- the root
+	// alone -- so every block with more than one transaction lost all but the
+	// first when balances were computed. The Merkle tree is now derived from
+	// this list rather than being the storage for it.
+	Txs []Transactions
+}
+
+// Transactions returns the block's transaction list.
+func (b *Block) Transactions() []Transactions {
+	if b == nil {
+		return nil
+	}
+	return b.Txs
+}
+
+// MerkleRoot returns the block's Merkle root, or nil when it holds no
+// transactions.
+func (b *Block) MerkleRoot() []byte {
+	if b == nil || b.TxMerkleTree == nil || b.TxMerkleTree.Root == nil {
+		return nil
+	}
+	return b.TxMerkleTree.Root.Hash
 }
 
 
@@ -47,21 +78,27 @@ func (b *Block) Print() {
 	fmt.Printf("Block Hash :     %x\n", b.BlockHash)
 }
 
+// Hash returns the block identifier: SHA-256 over a canonical preimage that
+// commits to the header *and* to the Merkle root of the block's transactions.
+//
+// The previous implementation set TxMerkleTree to nil before hashing, so the
+// block hash -- and therefore the validator signature computed over it -- did
+// not commit to the transactions at all. A validator could sign a block of
+// honest donations and then substitute an entirely different transaction set
+// without invalidating either the hash or the signature.
+//
+// BlockHash and Signature are excluded because they are derived from this value.
 func (b *Block) Hash() []byte {
-    tempBlock := *b 
-    tempBlock.BlockHash = nil
-    tempBlock.Signature = "" 
-    tempBlock.TxMerkleTree = nil
+	var buf bytes.Buffer
+	buf.WriteByte(BLOCK_VERSION)
+	writeField(&buf, b.PreviousHash)
+	_ = binary.Write(&buf, binary.BigEndian, b.Timestamp)
+	_ = binary.Write(&buf, binary.BigEndian, b.Height)
+	writeField(&buf, b.ValidatorAddress)
+	writeField(&buf, b.MerkleRoot())
 
-    // Use JSON instead of gob
-	//gob was causing a lot of problem (hash mis-match) so changed to JSON
-    blockJSON, err := json.Marshal(tempBlock)
-    if err != nil {
-        fmt.Println("Error while encoding block:", err)
-    }
-    
-    hash := sha256.Sum256(blockJSON)
-    return hash[:]
+	hash := sha256.Sum256(buf.Bytes())
+	return hash[:]
 }
 
 
@@ -77,7 +114,7 @@ func (b *Block) MarshalJSON() ([]byte, error) {
 		BlockHash    string        `json:"block_hash"`
 		Timestamp    uint64          `json:"timestamp"`
 		PreviousHash string     `json:"previous_hash"`
-		ValidatorAddress string `json: "validator_address"`
+		ValidatorAddress string `json:"validator_address"`
 		MerkleRoot   string     `json:"merkle_root"`
 		Transactions []Transactions `json:"transactions"`
 	}{
@@ -87,13 +124,22 @@ func (b *Block) MarshalJSON() ([]byte, error) {
 		PreviousHash:  fmt.Sprintf("%x", b.PreviousHash),
 		ValidatorAddress: string(b.ValidatorAddress),
 		MerkleRoot:   merkleRootHash,
+		// Previously declared but never populated, so every block serialized
+		// with "transactions": null regardless of its contents.
+		Transactions: b.Txs,
 	})
 }
 
+// AddTxToBlock sets the block's transaction list and derives its Merkle tree.
+// Every non-genesis transaction must carry a valid signature.
 func (b *Block) AddTxToBlock(txPool []Transactions) error {
-	var tree *MerkleTree
-	tree = NewMerkleTree(txPool)
-	b.TxMerkleTree = tree 
+	for i, tx := range txPool {
+		if err := tx.Verify(); err != nil {
+			return fmt.Errorf("transaction %d rejected: %v", i, err)
+		}
+	}
+	b.Txs = append([]Transactions(nil), txPool...)
+	b.TxMerkleTree = NewMerkleTree(b.Txs)
 	return nil
 }
 
@@ -110,30 +156,61 @@ func DeserializeBlockFromGOB(serializedBlock []byte) (*Block, error) {
 	return &blk, err
 }
 
+// CreateGenesisBlock builds the first block from the active chain
+// configuration. Genesis parameters were previously compile-time constants,
+// which made the chain impossible to re-initialise or reproduce.
 func CreateGenesisBlock() *Block {
-	genesisPubKeyHash, err := wallet.PubKeyFromAddress(GENESIS_ADDRESS)
+	cfg, err := ActiveConfig()
 	if err != nil {
-		log.Panic("invalid genesis address: %v", err)
+		log.Panicf("cannot create genesis block: %v", err)
+	}
+	genesisPubKeyHash, err := wallet.PubKeyFromAddress(cfg.GenesisAddress)
+	if err != nil {
+		log.Panicf("invalid genesis address: %v", err)
 	}
 
 	genesisTx := Transactions{
-		SenderHash: []byte("GENESIS"),
+		SenderHash: GENESIS_SENDER,
 		RecipientHash: genesisPubKeyHash,
-		Value: GENESIS_AMOUNT,
-		Timestamp: GENESIS_TIMESTAMP,
+		Value: cfg.GenesisAmount,
+		Timestamp: cfg.GenesisTimestamp,
 	}
 	genesisTx.TxID = genesisTx.Hash()
 	txPool := []Transactions{genesisTx}
-	merkleTree := NewMerkleTree(txPool)
 
-	block_hash := sha256.Sum256([]byte(GENESIS_STRING))
 	block := Block{
-		Timestamp: GENESIS_TIMESTAMP,
+		Timestamp: cfg.GenesisTimestamp,
 		Height: 0,
-		BlockHash: block_hash[:],
-		TxMerkleTree: merkleTree,
+		Txs: txPool,
+		TxMerkleTree: NewMerkleTree(txPool),
 	}
+	// The genesis hash is derived like every other block's, so the chain has a
+	// single hashing rule rather than a special case that skips the Merkle root.
+	block.BlockHash = block.Hash()
 	return &block
+}
+
+// VerifyTransactions checks every transaction in the block and confirms that
+// the stored Merkle tree actually commits to that transaction list.
+func (block *Block) VerifyTransactions() error {
+	for i, tx := range block.Transactions() {
+		if err := tx.Verify(); err != nil {
+			return fmt.Errorf("block transaction %d invalid: %v", i, err)
+		}
+	}
+
+	// Recompute the Merkle root so a block cannot carry a tree that disagrees
+	// with the transactions it ships.
+	recomputed := NewMerkleTree(block.Txs)
+	var want, got []byte
+	if recomputed != nil && recomputed.Root != nil {
+		want = recomputed.Root.Hash
+	}
+	got = block.MerkleRoot()
+	if !bytes.Equal(want, got) {
+		return errors.New("merkle root does not match the block's transactions")
+	}
+	return nil
 }
 
 func (block *Block) VerifyBlockHash() bool {
@@ -181,10 +258,13 @@ func (block *Block) MineBlock(chain *BlockChain, wlt *wallet.Wallet) error {
 
 	block.PreviousHash = lastHash
 	block.Height = lastBlock.Height + 1
-	Validators[string(wlt.Address)] = Validator{wlt.PublicKey, wlt.Address, true}
-	errr := ProofOfAuthority(block, wlt)
-	if errr != nil {
-		fmt.Println("Error while signing block: ", err)
+
+	// The caller used to be written into the Validators map here, *before*
+	// ProofOfAuthority checked authorisation -- so a rejected mining attempt
+	// still granted permanent validator status, after which the node could
+	// hand-sign blocks that AddBlock would accept. Authorisation is now
+	// decided solely by the configured validator set.
+	if errr := ProofOfAuthority(block, wlt); errr != nil {
 		return errr
 	}
 

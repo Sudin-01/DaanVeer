@@ -1,7 +1,5 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/Roshan310/DaanVeer v0.0.0-20250228143822-91522bc37625 h1:jYGEERlAlNtYzMS8d/pgH4AH3hO0uLLEitNuu+k8VrU=
-github.com/Roshan310/DaanVeer v0.0.0-20250228143822-91522bc37625/go.mod h1:YJ+aHwmM9hw+auXgfH7/1DV4tUbbScSPTWOpWTcPd78=
 github.com/bytedance/sonic v1.12.8 h1:4xYRVRlXIgvSZ4e8iVTlMF5szgpXd4AfvuWgA8I8lgs=
 github.com/bytedance/sonic v1.12.8/go.mod h1:uVvFidNmlt9+wa31S1urfwwthTWteBgG0hWuoKAXTx8=
 github.com/bytedance/sonic/loader v0.1.1/go.mod h1:ncP89zfokxS5LZrJxl5z0UJcsk4M4yY2JpfqGeCtNLU=
