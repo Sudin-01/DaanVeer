@@ -93,6 +93,12 @@ func writeBlockRaw(t *testing.T, chain *BlockChain, blk *Block) {
 		t.Fatalf("write block: %v", err)
 	}
 	chain.LastHash = blk.BlockHash
+
+	// This helper stands in for a commit, so the balance index must move with
+	// the chain -- otherwise balances read as zero.
+	if err := chain.connectToIndex(blk); err != nil {
+		t.Fatalf("index block: %v", err)
+	}
 }
 
 // authorize installs wallets as the validator set for the duration of a test.

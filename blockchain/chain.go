@@ -104,7 +104,16 @@ func InitBlockChainAt(path string) *BlockChain {
 	})
 	ShowError(err)
 
-	return &BlockChain{Database: db, LastHash: lastHash, Mempool: NewMempool()}
+	chain := &BlockChain{Database: db, LastHash: lastHash, Mempool: NewMempool()}
+
+	// Databases written before the index existed, or left inconsistent, are
+	// rebuilt once at startup rather than silently serving wrong balances.
+	if !chain.indexIsCurrent() {
+		if err := chain.RebuildIndex(); err != nil {
+			ShowError(err)
+		}
+	}
+	return chain
 }
 
 // Close releases the database.
@@ -291,9 +300,19 @@ func (blockchain *BlockChain) GetLastNTxs(n uint64) []*Transactions {
 	return lastNTxs
 }
 
-//it will return the available balance in a wallet
-//it needs to be refined
+// GetWalletBalance returns an account's balance from the index: a single key
+// lookup, independent of chain length.
 func (chain *BlockChain) GetWalletBalance(address string) (uint64, error) {
+	return chain.IndexedBalance(address)
+}
+
+// ScanWalletBalance recomputes a balance by replaying the whole chain.
+//
+// This was how every balance query worked, including the check that
+// NewTransaction runs before admitting a donation, making query cost linear in
+// chain length. It is retained as the reference implementation the index is
+// validated against, and as the baseline for E4.
+func (chain *BlockChain) ScanWalletBalance(address string) (uint64, error) {
 	var balance uint64
 	pubKeyHash, err := wallet.PubKeyFromAddress(address)
 	if err != nil {

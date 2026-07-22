@@ -180,6 +180,9 @@ func (chain *BlockChain) AcceptBlock(blk *Block) (AcceptStatus, error) {
 		if err := chain.commit(blk, true); err != nil {
 			return StatusOrphan, err
 		}
+		if err := chain.connectToIndex(blk); err != nil {
+			return StatusOrphan, fmt.Errorf("balance index update failed: %v", err)
+		}
 		chain.Mempool.RemoveMined(blk)
 		return StatusExtended, nil
 	}
@@ -220,13 +223,23 @@ func (chain *BlockChain) AcceptBlock(blk *Block) (AcceptStatus, error) {
 		prev = candidate
 	}
 
-	// Return transactions from the blocks being disconnected to the mempool.
+	// Return transactions from the blocks being disconnected to the mempool,
+	// and revert their effect on the balance index.
 	chain.restoreDisconnected(mainChain, ancestor)
+	if err := chain.disconnectBranch(ancestor); err != nil {
+		return StatusSideBranch, fmt.Errorf("balance index rollback failed: %v", err)
+	}
 
 	if err := chain.setTip(blk.BlockHash); err != nil {
 		return StatusSideBranch, err
 	}
 	for _, candidate := range branch {
+		if err := chain.connectToIndex(candidate); err != nil {
+			// The index no longer matches the chain; rebuild rather than
+			// serve balances derived from a half-applied reorganisation.
+			_ = chain.RebuildIndex()
+			break
+		}
 		chain.Mempool.RemoveMined(candidate)
 	}
 	return StatusReorg, nil
@@ -250,6 +263,24 @@ func (chain *BlockChain) restoreDisconnected(mainChain map[string]bool, ancestor
 			_ = chain.Mempool.Add(tx)
 		}
 	}
+}
+
+// disconnectBranch reverts the balance-index effect of every block from the
+// current tip back to (but excluding) the common ancestor.
+func (chain *BlockChain) disconnectBranch(ancestor *Block) error {
+	if ancestor == nil {
+		return nil
+	}
+	iter := BlockChainIterator{CurrentHash: chain.LastHash, Database: chain.Database}
+	for blk := iter.GetBlockAndIter(); blk != nil; blk = iter.GetBlockAndIter() {
+		if bytes.Equal(blk.BlockHash, ancestor.BlockHash) {
+			return nil
+		}
+		if err := chain.disconnectFromIndex(blk); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // commit stores a block, optionally advancing the tip to it.
