@@ -150,6 +150,65 @@ func (b *Block) AddTxToBlock(txPool []Transactions) error {
 }
 
 
+// blockWire is the serialized form of a block, for both storage and the
+// network.
+//
+// The Merkle tree is deliberately absent. MerkleNode embeds a full copy of a
+// transaction in every node -- including internal nodes, which correspond to no
+// transaction at all -- and a block previously serialized that tree alongside
+// its transaction list. Each transaction was therefore written roughly three
+// times, costing ~1259 bytes per transaction against a ~224 byte payload.
+//
+// The tree is a function of the transaction list, so it is rebuilt on decode
+// instead of being transmitted. The Merkle root remains committed to by the
+// block hash, so nothing about verification changes.
+type blockWire struct {
+	PreviousHash     []byte
+	Timestamp        uint64
+	BlockHash        []byte
+	Height           uint64
+	Signature        string
+	ValidatorAddress []byte
+	Attestations     []Attestation
+	Txs              []Transactions
+}
+
+// GobEncode implements gob.GobEncoder, so every gob path -- storage and the
+// p2p wire format alike -- uses the compact form.
+func (b Block) GobEncode() ([]byte, error) {
+	var encoded bytes.Buffer
+	err := gob.NewEncoder(&encoded).Encode(blockWire{
+		PreviousHash:     b.PreviousHash,
+		Timestamp:        b.Timestamp,
+		BlockHash:        b.BlockHash,
+		Height:           b.Height,
+		Signature:        b.Signature,
+		ValidatorAddress: b.ValidatorAddress,
+		Attestations:     b.Attestations,
+		Txs:              b.Txs,
+	})
+	return encoded.Bytes(), err
+}
+
+// GobDecode implements gob.GobDecoder, rebuilding the Merkle tree from the
+// transaction list.
+func (b *Block) GobDecode(data []byte) error {
+	var wire blockWire
+	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&wire); err != nil {
+		return err
+	}
+	b.PreviousHash = wire.PreviousHash
+	b.Timestamp = wire.Timestamp
+	b.BlockHash = wire.BlockHash
+	b.Height = wire.Height
+	b.Signature = wire.Signature
+	b.ValidatorAddress = wire.ValidatorAddress
+	b.Attestations = wire.Attestations
+	b.Txs = wire.Txs
+	b.TxMerkleTree = NewMerkleTree(b.Txs)
+	return nil
+}
+
 func (blk *Block) SerializeBlockToGOB() ([]byte, error) {
 	var encoded bytes.Buffer
 	err := gob.NewEncoder(&encoded).Encode(blk)
