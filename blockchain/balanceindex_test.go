@@ -155,3 +155,36 @@ func TestIndexRebuildMatchesScan(t *testing.T) {
 	assertAgrees(t, chain, tracked)
 	t.Log("rebuilding the index from genesis reproduced it exactly")
 }
+
+// V11: identical donations sent within the same second must remain distinct.
+//
+// The transaction identifier was derived from sender, recipient, value and a
+// second-resolution timestamp, so a donor sending the same amount to the same
+// recipient twice in one second produced one identifier, and the second
+// donation was silently rejected as a mempool duplicate. Throughput was capped
+// independently of consensus. Found by the E2 load generator, which recorded
+// 25,055 rejections against 120 accepted submissions.
+func TestV11_IdenticalDonationsInSameSecondAreDistinct(t *testing.T) {
+	chain := newTestChain(t)
+	donor, charity := newTestWallet(t), newTestWallet(t)
+	fundWallet(t, chain, donor, 1000)
+
+	const attempts = 50
+	seen := map[string]bool{}
+	for i := 0; i < attempts; i++ {
+		tx, err := NewTransaction(donor, charity.Address, 1, chain)
+		if err != nil {
+			t.Fatalf("donation %d of %d rejected: %v", i+1, attempts, err)
+		}
+		id := string(tx.TxID)
+		if seen[id] {
+			t.Fatalf("donation %d produced a duplicate transaction id", i+1)
+		}
+		seen[id] = true
+	}
+
+	if chain.Mempool.Len() != attempts {
+		t.Fatalf("mempool holds %d transactions, want %d", chain.Mempool.Len(), attempts)
+	}
+	t.Logf("%d identical donations in the same second produced %d distinct ids", attempts, len(seen))
+}

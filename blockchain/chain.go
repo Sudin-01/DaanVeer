@@ -300,9 +300,21 @@ func (blockchain *BlockChain) GetLastNTxs(n uint64) []*Transactions {
 	return lastNTxs
 }
 
+// BALANCE_SCAN_ENV forces balance queries through the full-chain scan.
+//
+// Set only to reproduce the pre-index behaviour on identical hardware, which is
+// what the E2 before/after comparison requires. It is not a supported operating
+// mode: query cost becomes linear in chain length.
+const BALANCE_SCAN_ENV = "DAANVEER_BALANCE_SCAN"
+
+var useScanBalance = os.Getenv(BALANCE_SCAN_ENV) != ""
+
 // GetWalletBalance returns an account's balance from the index: a single key
 // lookup, independent of chain length.
 func (chain *BlockChain) GetWalletBalance(address string) (uint64, error) {
+	if useScanBalance {
+		return chain.ScanWalletBalance(address)
+	}
 	return chain.IndexedBalance(address)
 }
 

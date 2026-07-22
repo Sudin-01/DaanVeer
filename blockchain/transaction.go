@@ -19,7 +19,10 @@ import (
 )
 // TX_VERSION prefixes the canonical encoding so the hash preimage format can
 // be changed later without silently colliding with previously signed data.
-const TX_VERSION byte = 2
+const TX_VERSION byte = 3
+
+// NONCE_LENGTH is the width of the per-transaction uniqueness nonce.
+const NONCE_LENGTH = 8
 
 // GENESIS_SENDER marks the coinbase-style transaction in the genesis block.
 var GENESIS_SENDER = []byte("GENESIS")
@@ -32,6 +35,16 @@ type Transactions struct {
 	Value         uint64 `json:"value"`
 	Signature     []byte `json:"-"`
 	Timestamp     uint64 `json:"timestamp"`
+
+	// Nonce makes each transaction unique.
+	//
+	// The identifier was previously derived from sender, recipient, value and
+	// a second-resolution timestamp, so two identical donations sent in the
+	// same second produced the same TxID and the second was silently rejected
+	// as a mempool duplicate. That capped donation throughput independently of
+	// consensus. A random nonce removes the dependence on clock resolution
+	// entirely, rather than merely narrowing the window.
+	Nonce []byte `json:"-"`
 }
 
 // Struct for JSON conversion
@@ -120,11 +133,17 @@ func NewTransaction(srcWallet *wallet.Wallet, destinationAddr string, amount uin
 		return nil, err
 	}
 
-	newTx := Transactions{	
+	nonce := make([]byte, NONCE_LENGTH)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("could not generate transaction nonce: %v", err)
+	}
+
+	newTx := Transactions{
 		SenderHash:    senderPubKeyHash,
 		RecipientHash: receiverPubKeyHash,
-		Value: amount,
-		Timestamp: uint64(time.Now().Unix()),
+		Nonce:         nonce,
+		Value:         amount,
+		Timestamp:     uint64(time.Now().Unix()),
 	}
 
 	// SignTransaction sets SenderPubKey and TxID before signing, since both are
@@ -175,6 +194,7 @@ func (t *Transactions) canonicalBytes() []byte {
 	writeField(&buf, t.SenderHash)
 	writeField(&buf, t.SenderPubKey)
 	writeField(&buf, t.RecipientHash)
+	writeField(&buf, t.Nonce)
 	_ = binary.Write(&buf, binary.BigEndian, t.Value)
 	_ = binary.Write(&buf, binary.BigEndian, t.Timestamp)
 	return buf.Bytes()

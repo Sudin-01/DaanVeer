@@ -42,6 +42,8 @@ BIN="$TESTBED/daanveer"
 export DAANVEER_WALLET_KEY="${DAANVEER_WALLET_KEY:-testbed-local-network-key}"
 export DAANVEER_NODE_ADDRESS="${DAANVEER_NODE_ADDRESS:-127.0.0.1}"
 export DAANVEER_QUIET_DB=1
+# Load tests need a genesis grant large enough to fund the whole run.
+export DAANVEER_GENESIS_AMOUNT="${DAANVEER_GENESIS_AMOUNT:-100000000}"
 export GIN_MODE=release
 
 api_port() { echo $((8080 + ($1 - 1) * 10)); }

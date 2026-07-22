@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/Sudin-01/DaanVeer/api"
 	"github.com/Sudin-01/DaanVeer/blockchain"
@@ -13,12 +14,12 @@ import (
 
 func main() {
 	var (
-		initChain  = flag.Bool("init", false, "generate a wallet and a fresh chain configuration, then exit")
+		initChain    = flag.Bool("init", false, "generate a wallet and a fresh chain configuration, then exit")
 		addValidator = flag.Bool("add-validator", false, "add this node's wallet to an existing chain configuration, then exit")
-		configPath = flag.String("config", blockchain.CHAIN_CONFIG, "path to the chain configuration")
-		walletPath = flag.String("wallet", "my_wallet.txt", "path to the wallet file")
-		dbPath     = flag.String("db", "", "path to the block database (default: $DAANVEER_DB or ./db)")
-		port       = flag.String("port", api.PORT, "port to serve the HTTP API and p2p listener on")
+		configPath   = flag.String("config", blockchain.CHAIN_CONFIG, "path to the chain configuration")
+		walletPath   = flag.String("wallet", "my_wallet.txt", "path to the wallet file")
+		dbPath       = flag.String("db", "", "path to the block database (default: $DAANVEER_DB or ./db)")
+		port         = flag.String("port", api.PORT, "port to serve the HTTP API and p2p listener on")
 	)
 	flag.Parse()
 
@@ -73,9 +74,18 @@ func bootstrap(configPath, walletPath string) error {
 		return err
 	}
 
+	// A load test exhausts a small genesis grant long before it has gathered
+	// enough samples, so the amount is configurable.
+	amount := uint64(blockchain.DEFAULT_GENESIS_AMOUNT)
+	if raw := os.Getenv("DAANVEER_GENESIS_AMOUNT"); raw != "" {
+		if parsed, err := strconv.ParseUint(raw, 10, 64); err == nil && parsed > 0 {
+			amount = parsed
+		}
+	}
+
 	cfg, err := blockchain.NewSingleValidatorConfig(
 		wlt,
-		blockchain.DEFAULT_GENESIS_AMOUNT,
+		amount,
 		blockchain.DEFAULT_GENESIS_TIMESTAMP,
 	)
 	if err != nil {
