@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
-	"time"
 
 	"github.com/Sudin-01/DaanVeer/blockchain"
 	"github.com/Sudin-01/DaanVeer/communication"
+	"github.com/Sudin-01/DaanVeer/internal/hrtime"
 	"github.com/Sudin-01/DaanVeer/wallet"
 	"github.com/gin-gonic/gin"
 )
@@ -260,12 +260,16 @@ func PostMineBlock(chain *blockchain.BlockChain, wlt *wallet.Wallet) gin.Handler
 		// Gather attestations from peer validators until the quorum is met.
 		// Without this the proposer would commit alone and the configured
 		// quorum would be decorative.
-		roundStart := time.Now()
+		// Timed with the performance counter rather than time.Now: a consensus
+		// round takes single-digit milliseconds, and on Windows the standard
+		// clock advances only about once per millisecond, which would quantise
+		// this figure to a handful of levels. See internal/hrtime.
+		roundStart := hrtime.Now()
 		if err := communication.RunConsensusRound(newBlock, communication.DefaultRoundTimeout); err != nil {
 			c.JSON(409, ErrorJSON{ErrorMsg: fmt.Sprintf("consensus failed: %v", err)})
 			return
 		}
-		roundDuration := time.Since(roundStart)
+		roundDuration := hrtime.Since(roundStart)
 
 		if err := chain.AddBlock(newBlock); err != nil {
 			c.JSON(400, ErrorJSON{ErrorMsg: fmt.Sprintf("could not commit block: %v", err)})
@@ -282,7 +286,7 @@ func PostMineBlock(chain *blockchain.BlockChain, wlt *wallet.Wallet) gin.Handler
 			"block":        newBlock,
 			"attestations": newBlock.CountAttestations(),
 			"quorum":       blockchain.QuorumSize(),
-			"consensus_ms": float64(roundDuration.Microseconds()) / 1000.0,
+			"consensus_ms": float64(roundDuration.Nanoseconds()) / 1e6,
 		})
 	}
 	return fn

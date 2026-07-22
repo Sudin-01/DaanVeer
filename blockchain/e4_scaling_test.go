@@ -8,25 +8,29 @@ package blockchain
 // the scan against the index that replaces it.
 //
 //	go test ./blockchain/ -run TestE4 -v
-//	go test ./blockchain/ -run TestE4 -v -e4-max=10000    (longer chains)
+//	go test ./blockchain/ -run TestE4 -v -e4-max=50000 -timeout 60m
 //
-// Results are written to experiments/results/e4_balance_scaling.csv.
+// Every point is repeated and reported as a median with a bootstrap interval;
+// the scan-versus-index comparison at each length is tested with Mann-Whitney
+// rather than asserted from the point estimates. Timing goes through
+// internal/hrtime, because the standard library clock on this platform cannot
+// resolve the indexed lookup at all -- see E12.
+//
+// Results are written to experiments/results/e4_balance_scaling.csv, with
+// every individual observation in e4_balance_samples.csv.
 
 import (
-	"encoding/csv"
 	"flag"
-	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/Sudin-01/DaanVeer/wallet"
 )
 
-var e4Max = flag.Int("e4-max", 2000, "longest chain to measure in E4")
+var (
+	e4Max  = flag.Int("e4-max", 2000, "longest chain to measure in E4")
+	e4Reps = flag.Int("e4-reps", 0, "observations per point (0 selects a default)")
+)
 
 // buildChain appends n blocks, each carrying one donation from donor.
 func buildChain(t *testing.T, chain *BlockChain, validator, donor *wallet.Wallet, n int) {
@@ -49,39 +53,26 @@ func buildChain(t *testing.T, chain *BlockChain, validator, donor *wallet.Wallet
 	}
 }
 
-// medianPerOp times `batch` calls together and returns the median per-call
-// duration across `samples` batches.
-//
-// Batching matters for the index path: a single lookup is faster than the
-// resolution of a naive time.Since, which truncates to whole microseconds and
-// reports a genuine sub-microsecond result as zero.
-func medianPerOp(samples, batch int, fn func()) time.Duration {
-	observations := make([]time.Duration, samples)
-	for i := range observations {
-		start := time.Now()
-		for j := 0; j < batch; j++ {
-			fn()
-		}
-		observations[i] = time.Since(start) / time.Duration(batch)
-	}
-	sort.Slice(observations, func(i, j int) bool { return observations[i] < observations[j] })
-	return observations[len(observations)/2]
-}
-
-// milliseconds converts with nanosecond precision retained.
-func milliseconds(d time.Duration) float64 {
-	return float64(d.Nanoseconds()) / 1e6
+// e4Row is one measured chain length.
+type e4Row struct {
+	blocks  int
+	scan    dist
+	index   dist
+	speedup float64
+	p       float64
+	delta   float64
 }
 
 func TestE4_BalanceQueryScaling(t *testing.T) {
 	lengths := []int{10, 100, 500, 1000}
-	for _, extra := range []int{2000, 5000, 10000} {
+	for _, extra := range []int{2000, 5000, 10000, 20000, 50000, 100000} {
 		if *e4Max >= extra {
 			lengths = append(lengths, extra)
 		}
 	}
 
 	var rows []e4Row
+	samples := map[string]dist{}
 
 	chain := newTestChain(t)
 	validator := newTestWallet(t)
@@ -109,74 +100,87 @@ func TestE4_BalanceQueryScaling(t *testing.T) {
 			t.Fatalf("at %d blocks: scan=%d index=%d", built, scanned, indexed)
 		}
 
-		samples := 21
-		if built > 2000 {
-			samples = 5 // the scan gets expensive
+		// The scan gets expensive on long chains, so it gets fewer
+		// observations -- but never so few that an interval is meaningless.
+		reps := *e4Reps
+		if reps == 0 {
+			switch {
+			case built > 20000:
+				reps = 10
+			case built > 5000:
+				reps = 15
+			default:
+				reps = repetitionsDefault * 2
+			}
 		}
-		scanTime := medianPerOp(samples, 1, func() { _, _ = chain.ScanWalletBalance(donor.Address) })
-		indexTime := medianPerOp(21, 1000, func() { _, _ = chain.IndexedBalance(donor.Address) })
 
-		scanMS := milliseconds(scanTime)
-		indexMS := milliseconds(indexTime)
+		// The scan is milliseconds and needs no batching; the indexed lookup
+		// is microseconds and is batched automatically.
+		scanD := measure(reps, 1, func() { _, _ = chain.ScanWalletBalance(donor.Address) })
+		indexD := autoMeasure(repetitionsMicro, func() { _, _ = chain.IndexedBalance(donor.Address) })
+
 		speedup := 0.0
-		if indexMS > 0 {
-			speedup = scanMS / indexMS
+		if indexD.p50 > 0 {
+			speedup = scanD.p50 / indexD.p50
 		}
-		rows = append(rows, e4Row{built, scanMS, indexMS, speedup})
-		t.Logf("%6d blocks: scan %9.3f ms   index %8.5f ms   speedup %8.0fx",
-			built, scanMS, indexMS, speedup)
+		_, p := mannWhitney(scanD.raw, indexD.raw)
+		delta := cliffsDelta(scanD.raw, indexD.raw)
+
+		rows = append(rows, e4Row{built, scanD, indexD, speedup, p, delta})
+		samples[strconv.Itoa(built)+"|scan"] = scanD
+		samples[strconv.Itoa(built)+"|index"] = indexD
+
+		t.Logf("%6d blocks:", built)
+		t.Logf("    scan  %s", scanD)
+		t.Logf("    index %s", indexD)
+		t.Logf("    speedup %.0fx, %s, Cliff's delta %.2f (%s)",
+			speedup, significance(p), delta, cliffsMagnitude(delta))
 	}
 
 	// The scan must grow with chain length; the index must not.
 	first, last := rows[0], rows[len(rows)-1]
-	growth := last.scanMS / first.scanMS
+	growth := last.scan.p50 / first.scan.p50
 	lengthRatio := float64(last.blocks) / float64(first.blocks)
 	t.Logf("chain grew %.0fx; scan cost grew %.1fx; index cost %.5f -> %.5f ms",
-		lengthRatio, growth, first.indexMS, last.indexMS)
+		lengthRatio, growth, first.index.p50, last.index.p50)
 
 	if growth < lengthRatio/4 {
 		t.Errorf("scan cost grew only %.1fx over a %.0fx longer chain; expected roughly linear",
 			growth, lengthRatio)
 	}
-	if last.indexMS > first.indexMS*10+1 {
-		t.Errorf("index cost grew from %.3f to %.3f ms; expected roughly constant",
-			first.indexMS, last.indexMS)
+	if last.index.p50 > first.index.p50*10+1 {
+		t.Errorf("index cost grew from %.5f to %.5f ms; expected roughly constant",
+			first.index.p50, last.index.p50)
+	}
+
+	// The scan being slower than the index is the claim; test it rather than
+	// reading it off the medians.
+	for _, r := range rows {
+		if r.p > 0.05 {
+			t.Errorf("at %d blocks the scan/index difference is not significant (%s)",
+				r.blocks, significance(r.p))
+		}
 	}
 
 	writeE4CSV(t, rows)
-}
-
-// e4Row is one measured chain length.
-type e4Row struct {
-	blocks          int
-	scanMS, indexMS float64
-	speedup         float64
+	writeRawSamples(t, "e4_balance_samples.csv", []string{"blocks_and_method"}, samples)
 }
 
 func writeE4CSV(t *testing.T, rows []e4Row) {
 	t.Helper()
-	path := filepath.Join("..", "experiments", "results", "e4_balance_scaling.csv")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Logf("could not create results directory: %v", err)
-		return
-	}
-	fh, err := os.Create(path)
-	if err != nil {
-		t.Logf("could not write results: %v", err)
-		return
-	}
-	defer fh.Close()
+	header := append([]string{"blocks"}, distColumns("scan_ms")...)
+	header = append(header, distColumns("index_ms")...)
+	header = append(header, "speedup", "mannwhitney_p", "cliffs_delta")
 
-	w := csv.NewWriter(fh)
-	defer w.Flush()
-	_ = w.Write([]string{"blocks", "scan_ms", "index_ms", "speedup"})
+	var out [][]string
 	for _, r := range rows {
-		_ = w.Write([]string{
-			strconv.Itoa(r.blocks),
-			strconv.FormatFloat(r.scanMS, 'f', 4, 64),
-			strconv.FormatFloat(r.indexMS, 'f', 4, 64),
+		rec := append([]string{strconv.Itoa(r.blocks)}, distValues(r.scan)...)
+		rec = append(rec, distValues(r.index)...)
+		rec = append(rec,
 			strconv.FormatFloat(r.speedup, 'f', 1, 64),
-		})
+			strconv.FormatFloat(r.p, 'g', 4, 64),
+			strconv.FormatFloat(r.delta, 'f', 4, 64))
+		out = append(out, rec)
 	}
-	fmt.Printf("wrote %s\n", path)
+	writeCSV(t, "e4_balance_scaling.csv", header, out)
 }

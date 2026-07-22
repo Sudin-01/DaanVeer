@@ -1,0 +1,3 @@
+clock,tick_ns,median_advance_ns,reads,reads_advanced,advanced_pct,call_cost_ns
+time.Now (Go standard library),1000900,1005900,200000,2,0.0010,6
+QueryPerformanceCounter,100,100,200000,199999,99.9995,148

@@ -6,26 +6,25 @@ import (
 	"fmt"
 )
 
-
 // MerkleNode represents a node in the Merkle tree.
 type MerkleNode struct {
-	Left  *MerkleNode
-	Right *MerkleNode
-	Hash  []byte
+	Left        *MerkleNode
+	Right       *MerkleNode
+	Hash        []byte
 	Transaction Transactions
 }
 
+func (node *MerkleNode) Print() {
 
-func (node *MerkleNode) Print()  {
-
-	if node == nil{
+	if node == nil {
 		return
 	}
 	fmt.Printf("%x\n", node.Hash)
 	node.Left.Print()
 	node.Right.Print()
-	
+
 }
+
 // MerkleTree represents the entire Merkle tree.
 type MerkleTree struct {
 	Root  *MerkleNode
@@ -44,9 +43,9 @@ func NewMerkleNode(left, right *MerkleNode, hash []byte, tx Transactions) *Merkl
 	}
 
 	return &MerkleNode{
-		Left:  left,
-		Right: right,
-		Hash:  nodeHash,
+		Left:        left,
+		Right:       right,
+		Hash:        nodeHash,
 		Transaction: tx,
 	}
 }
@@ -59,7 +58,7 @@ func NewMerkleTree(transactions []Transactions) *MerkleTree {
 
 	// Create leaf nodes.
 	var nodes []*MerkleNode
-	
+
 	for _, tx := range transactions {
 		hash := tx.Hash()
 		nodes = append(nodes, NewMerkleNode(nil, nil, hash, tx))

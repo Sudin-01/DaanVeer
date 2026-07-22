@@ -1,0 +1,5 @@
+spin_iterations,true_ms_fine_clock,median_ms_coarse_clock,distinct_coarse,distinct_fine,coarse_read_zero,samples
+2000,0.0042,0,1,21,300,300
+20000,0.0455,0,12,68,289,300
+200000,0.4967,0,110,224,160,300
+2000000,4.5627,4.52715,282,298,0,300

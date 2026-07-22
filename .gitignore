@@ -25,6 +25,10 @@ test.txt
 
 # Research materials -- kept local until publication.
 # docs/README.md is the public project README and stays tracked.
-docs/RESEARCH_PLAN.md
-docs/RELATED_WORK.md
-docs/paper/
+# Everything else under docs/ is research material that must not be published:
+# the plan, the related-work survey, the paper source, and the original minor
+# project. A blanket ignore with an explicit exception is used rather than a
+# list of names, because `git add -A` twice swept in a file the list did not
+# anticipate.
+docs/*
+!docs/README.md

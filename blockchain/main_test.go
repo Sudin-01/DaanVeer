@@ -15,6 +15,9 @@ func TestMain(m *testing.M) {
 	if os.Getenv(VLOG_MB_ENV) == "" {
 		os.Setenv(VLOG_MB_ENV, "2")
 	}
+	if os.Getenv(MEMTABLE_MB_ENV) == "" {
+		os.Setenv(MEMTABLE_MB_ENV, "4")
+	}
 	os.Setenv("DAANVEER_QUIET_DB", "1")
 	os.Exit(m.Run())
 }

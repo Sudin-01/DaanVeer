@@ -11,10 +11,10 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
-const(
-	DB_PATH = "./db"
+const (
+	DB_PATH         = "./db"
 	LAST_BLOCK_HASH = "last_hash"
-	BALANCE_PREFIX = "balance_"
+	BALANCE_PREFIX  = "balance_"
 )
 
 type BlockChain struct {
@@ -60,19 +60,49 @@ const VLOG_MB_ENV = "DAANVEER_VLOG_MB"
 // (E5) with preallocation rather than actual chain data.
 const DEFAULT_VLOG_MB = 64
 
+// MEMTABLE_MB_ENV overrides the BadgerDB memtable size, in megabytes.
+const MEMTABLE_MB_ENV = "DAANVEER_MEMTABLE_MB"
+
+// DEFAULT_MEMTABLE_MB is the memtable size used when MEMTABLE_MB_ENV is unset.
+//
+// This is a second preallocation, independent of the value log, and it bites
+// for the same reason: BadgerDB defaults to 64 MiB and allocates it per open
+// database. The fault-tolerance experiment opens one database per (validator
+// count, fault count) pair, which at validator sets up to sixteen is nearly
+// sixty databases and close to four gigabytes of preallocation for a few
+// kilobytes of blocks. It fails outright on a volume with less free space than
+// that, which is how this constant came to exist.
+const DEFAULT_MEMTABLE_MB = 64
+
+// envMB reads a megabyte-valued override, falling back to a default.
+func envMB(key string, fallback int64) int64 {
+	if raw := os.Getenv(key); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return fallback
+}
+
 // BadgerOptions returns tuned database options for the given directory.
 func BadgerOptions(path string) badger.Options {
 	opts := badger.DefaultOptions(path)
 	if os.Getenv("DAANVEER_QUIET_DB") != "" {
 		opts.Logger = nil
 	}
-	sizeMB := int64(DEFAULT_VLOG_MB)
-	if raw := os.Getenv(VLOG_MB_ENV); raw != "" {
-		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
-			sizeMB = parsed
-		}
+	opts.ValueLogFileSize = envMB(VLOG_MB_ENV, DEFAULT_VLOG_MB) << 20
+
+	memTable := envMB(MEMTABLE_MB_ENV, DEFAULT_MEMTABLE_MB) << 20
+	opts.MemTableSize = memTable
+	// BadgerDB requires the base table and value threshold to stay in
+	// proportion to the memtable; leaving them at defaults while shrinking the
+	// memtable trips an internal validation check.
+	if opts.BaseTableSize > memTable {
+		opts.BaseTableSize = memTable / 2
 	}
-	opts.ValueLogFileSize = sizeMB << 20
+	if int64(opts.ValueThreshold) > memTable/8 {
+		opts.ValueThreshold = memTable / 8
+	}
 	return opts
 }
 
@@ -241,7 +271,6 @@ func (blockchain *BlockChain) GetBlockHashesFromHeight(height uint64) [][]byte {
 
 	return hashesInOrder
 }
-
 
 func (blockchain *BlockChain) WalletMinedBlocks(walletAddress string) ([]*Block, error) {
 	var minedBlocks []*Block

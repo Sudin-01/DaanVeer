@@ -304,7 +304,12 @@ func TestE7_ByzantineTolerance(t *testing.T) {
 	}
 	var results []result
 
-	for _, n := range []int{1, 3, 4, 5, 7} {
+	// Validator-set sizes span both sides of every rounding boundary in
+	// ceil(2N/3) and floor(N/3). N=10, 13 and 16 are included because the
+	// tolerated-fault count is easy to get right for small N by accident: at
+	// N=3 and N=4 the quorum happens to equal N-1, so an implementation that
+	// simply required "all but one" would pass. It fails at N=10.
+	for _, n := range []int{1, 3, 4, 5, 7, 10, 13, 16} {
 		for faulty := 0; faulty < n; faulty++ {
 			chain := newTestChain(t)
 			validators := validatorSet(t, n, 0, false) // default quorum

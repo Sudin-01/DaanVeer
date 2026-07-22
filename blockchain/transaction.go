@@ -17,6 +17,7 @@ import (
 
 	"github.com/Sudin-01/DaanVeer/wallet"
 )
+
 // TX_VERSION prefixes the canonical encoding so the hash preimage format can
 // be changed later without silently colliding with previously signed data.
 const TX_VERSION byte = 3
@@ -113,7 +114,6 @@ func (tx *Transactions) UnmarshalJSON(data []byte) error {
 
 	return nil
 }
-
 
 // NewCampaignTransaction creates a donation earmarked to a named campaign.
 //
@@ -306,7 +306,6 @@ func (t *Transactions) Verify() error {
 func (t *Transactions) VerifyTransaction(pubKey *ecdsa.PublicKey) bool {
 	return t.Verify() == nil
 }
-
 
 func (tx Transactions) SerializeTxToGOB() ([]byte, error) {
 	var encoded bytes.Buffer

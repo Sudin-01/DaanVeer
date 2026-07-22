@@ -15,6 +15,7 @@ import (
 	"github.com/Sudin-01/DaanVeer/wallet"
 	"github.com/dgraph-io/badger/v4"
 )
+
 const (
 	GENESIS_STRING = "THIS IS THE FIRST BLOCK"
 	// DEFAULT_GENESIS_TIMESTAMP is used when bootstrapping a fresh config.
@@ -22,6 +23,7 @@ const (
 	// DEFAULT_GENESIS_AMOUNT is the initial grant written into a fresh config.
 	DEFAULT_GENESIS_AMOUNT = 1000
 )
+
 func init() {
 	log.SetPrefix("Blockchain: ")
 }
@@ -30,13 +32,13 @@ func init() {
 const BLOCK_VERSION byte = 2
 
 type Block struct {
-	PreviousHash []byte
-	Timestamp    uint64
-	BlockHash []byte
-	Height uint64
-	Signature	string
+	PreviousHash     []byte
+	Timestamp        uint64
+	BlockHash        []byte
+	Height           uint64
+	Signature        string
 	ValidatorAddress []byte
-	TxMerkleTree *MerkleTree
+	TxMerkleTree     *MerkleTree
 
 	// Attestations are signatures from validators other than the proposer.
 	// They cover the block hash, which is fixed before any attestation is
@@ -70,7 +72,6 @@ func (b *Block) MerkleRoot() []byte {
 	}
 	return b.TxMerkleTree.Root.Hash
 }
-
 
 func CreateBlock() *Block {
 	var blk Block
@@ -107,29 +108,28 @@ func (b *Block) Hash() []byte {
 	return hash[:]
 }
 
-
 func (b *Block) MarshalJSON() ([]byte, error) {
 	var merkleRootHash string
 	if b.TxMerkleTree != nil && b.TxMerkleTree.Root != nil {
 		merkleRootHash = fmt.Sprintf("%x", b.TxMerkleTree.Root.Hash)
 	} else {
-		merkleRootHash = "" 
+		merkleRootHash = ""
 	}
 	return json.Marshal(struct {
-		Height 	 uint64          `json:"height"`
-		BlockHash    string        `json:"block_hash"`
-		Timestamp    uint64          `json:"timestamp"`
-		PreviousHash string     `json:"previous_hash"`
-		ValidatorAddress string `json:"validator_address"`
-		MerkleRoot   string     `json:"merkle_root"`
-		Transactions []Transactions `json:"transactions"`
+		Height           uint64         `json:"height"`
+		BlockHash        string         `json:"block_hash"`
+		Timestamp        uint64         `json:"timestamp"`
+		PreviousHash     string         `json:"previous_hash"`
+		ValidatorAddress string         `json:"validator_address"`
+		MerkleRoot       string         `json:"merkle_root"`
+		Transactions     []Transactions `json:"transactions"`
 	}{
-		Height:       b.Height,
-		BlockHash:    fmt.Sprintf("%x", b.BlockHash),
-		Timestamp:    b.Timestamp,
-		PreviousHash:  fmt.Sprintf("%x", b.PreviousHash),
+		Height:           b.Height,
+		BlockHash:        fmt.Sprintf("%x", b.BlockHash),
+		Timestamp:        b.Timestamp,
+		PreviousHash:     fmt.Sprintf("%x", b.PreviousHash),
 		ValidatorAddress: string(b.ValidatorAddress),
-		MerkleRoot:   merkleRootHash,
+		MerkleRoot:       merkleRootHash,
 		// Previously declared but never populated, so every block serialized
 		// with "transactions": null regardless of its contents.
 		Transactions: b.Txs,
@@ -148,7 +148,6 @@ func (b *Block) AddTxToBlock(txPool []Transactions) error {
 	b.TxMerkleTree = NewMerkleTree(b.Txs)
 	return nil
 }
-
 
 // blockWire is the serialized form of a block, for both storage and the
 // network.
@@ -235,18 +234,18 @@ func CreateGenesisBlock() *Block {
 	}
 
 	genesisTx := Transactions{
-		SenderHash: GENESIS_SENDER,
+		SenderHash:    GENESIS_SENDER,
 		RecipientHash: genesisPubKeyHash,
-		Value: cfg.GenesisAmount,
-		Timestamp: cfg.GenesisTimestamp,
+		Value:         cfg.GenesisAmount,
+		Timestamp:     cfg.GenesisTimestamp,
 	}
 	genesisTx.TxID = genesisTx.Hash()
 	txPool := []Transactions{genesisTx}
 
 	block := Block{
-		Timestamp: cfg.GenesisTimestamp,
-		Height: 0,
-		Txs: txPool,
+		Timestamp:    cfg.GenesisTimestamp,
+		Height:       0,
+		Txs:          txPool,
 		TxMerkleTree: NewMerkleTree(txPool),
 	}
 	// The genesis hash is derived like every other block's, so the chain has a
@@ -292,29 +291,29 @@ func (block *Block) MineBlock(chain *BlockChain, wlt *wallet.Wallet) error {
 	var lastBlock *Block
 
 	err := chain.Database.View(func(txn *badger.Txn) error {
-			lastHashQuery, err := txn.Get([]byte(LAST_BLOCK_HASH))
-			if err != nil {
-				return err
-			}
-
-			err = lastHashQuery.Value(func(val []byte) error {
-					lastHash = append(lastHash, val...)
-					return nil
-			})
-			if err != nil {
-				return err
-			}
-			lastBlockQuery, err := txn.Get(lastHash)
-			if err != nil {
-				return err
-			}
-
-			err = lastBlockQuery.Value(func(val []byte) error {
-				lastBlock, err = DeserializeBlockFromGOB(val)
-				fmt.Println("Last Block: ", lastBlock)
-				return err
-			})
+		lastHashQuery, err := txn.Get([]byte(LAST_BLOCK_HASH))
+		if err != nil {
 			return err
+		}
+
+		err = lastHashQuery.Value(func(val []byte) error {
+			lastHash = append(lastHash, val...)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		lastBlockQuery, err := txn.Get(lastHash)
+		if err != nil {
+			return err
+		}
+
+		err = lastBlockQuery.Value(func(val []byte) error {
+			lastBlock, err = DeserializeBlockFromGOB(val)
+			fmt.Println("Last Block: ", lastBlock)
+			return err
+		})
+		return err
 	})
 
 	if err != nil {

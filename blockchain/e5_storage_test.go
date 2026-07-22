@@ -50,10 +50,10 @@ func TestE5_BlockSizeVsTransactions(t *testing.T) {
 	recipient := newTestWallet(t)
 
 	type row struct {
-		txs        int
-		bytes      int
-		perTx      float64
-		overheadB  int
+		txs       int
+		bytes     int
+		perTx     float64
+		overheadB int
 	}
 	var rows []row
 	var emptyBytes int

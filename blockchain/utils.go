@@ -23,7 +23,6 @@ func getForwardSlashPosition(value string) int {
 	return -1
 }
 
-
 // NODE_ADDRESS_ENV overrides automatic node address detection.
 const NODE_ADDRESS_ENV = "DAANVEER_NODE_ADDRESS"
 
