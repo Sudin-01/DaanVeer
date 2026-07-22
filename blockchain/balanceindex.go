@@ -104,6 +104,9 @@ func (chain *BlockChain) connectToIndex(blk *Block) error {
 		if err := indexBlock(txn, blk, +1); err != nil {
 			return err
 		}
+		if err := provenanceForBlock(txn, blk, +1); err != nil {
+			return err
+		}
 		return txn.Set([]byte(INDEX_HEIGHT_KEY), blk.BlockHash)
 	})
 }
@@ -111,6 +114,9 @@ func (chain *BlockChain) connectToIndex(blk *Block) error {
 // disconnectFromIndex reverts a block that is leaving the main chain.
 func (chain *BlockChain) disconnectFromIndex(blk *Block) error {
 	return chain.Database.Update(func(txn *badger.Txn) error {
+		if err := provenanceForBlock(txn, blk, -1); err != nil {
+			return err
+		}
 		return indexBlock(txn, blk, -1)
 	})
 }
@@ -144,16 +150,22 @@ func (chain *BlockChain) RebuildIndex() error {
 	}
 
 	return chain.Database.Update(func(txn *badger.Txn) error {
-		// Drop existing entries.
+		// Drop existing entries: balances and both provenance indexes. Leaving
+		// provenance behind would make a rebuild produce doubled attributions.
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchValues = false
-		it := txn.NewIterator(opts)
 		var stale [][]byte
-		prefix := []byte(BALANCE_PREFIX)
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			stale = append(stale, it.Item().KeyCopy(nil))
+		for _, prefix := range [][]byte{
+			[]byte(BALANCE_PREFIX),
+			[]byte(provByAccount),
+			[]byte(provByCampaign),
+		} {
+			it := txn.NewIterator(opts)
+			for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+				stale = append(stale, it.Item().KeyCopy(nil))
+			}
+			it.Close()
 		}
-		it.Close()
 		for _, key := range stale {
 			if err := txn.Delete(key); err != nil {
 				return err
@@ -162,6 +174,9 @@ func (chain *BlockChain) RebuildIndex() error {
 
 		for i := len(blocks) - 1; i >= 0; i-- {
 			if err := indexBlock(txn, blocks[i], +1); err != nil {
+				return err
+			}
+			if err := provenanceForBlock(txn, blocks[i], +1); err != nil {
 				return err
 			}
 		}

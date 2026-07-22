@@ -36,6 +36,11 @@ type Transactions struct {
 	Signature     []byte `json:"-"`
 	Timestamp     uint64 `json:"timestamp"`
 
+	// CampaignID earmarks a donation to a named cause, or is empty for an
+	// unattributed transfer. Part of the signed preimage, so the earmark
+	// cannot be altered after the donor signs.
+	CampaignID []byte `json:"-"`
+
 	// Nonce makes each transaction unique.
 	//
 	// The identifier was previously derived from sender, recipient, value and
@@ -110,7 +115,24 @@ func (tx *Transactions) UnmarshalJSON(data []byte) error {
 }
 
 
+// NewCampaignTransaction creates a donation earmarked to a named campaign.
+//
+// The earmark is part of the signed preimage, so it cannot be altered after the
+// donor signs it, and it is what makes the funds traceable through onward
+// transfers.
+func NewCampaignTransaction(srcWallet *wallet.Wallet, destinationAddr string, amount uint64, campaign string, chain *BlockChain) (*Transactions, error) {
+	tx, err := newTransaction(srcWallet, destinationAddr, amount, CampaignID(campaign), chain)
+	if err != nil {
+		return nil, err
+	}
+	return tx, nil
+}
+
 func NewTransaction(srcWallet *wallet.Wallet, destinationAddr string, amount uint64, chain *BlockChain) (*Transactions, error) {
+	return newTransaction(srcWallet, destinationAddr, amount, nil, chain)
+}
+
+func newTransaction(srcWallet *wallet.Wallet, destinationAddr string, amount uint64, campaign []byte, chain *BlockChain) (*Transactions, error) {
 	senderAddress := string(srcWallet.Address)
 	// Check against the spendable balance -- committed funds less those already
 	// reserved by unmined transactions. Checking committed state alone let a
@@ -141,6 +163,7 @@ func NewTransaction(srcWallet *wallet.Wallet, destinationAddr string, amount uin
 	newTx := Transactions{
 		SenderHash:    senderPubKeyHash,
 		RecipientHash: receiverPubKeyHash,
+		CampaignID:    campaign,
 		Nonce:         nonce,
 		Value:         amount,
 		Timestamp:     uint64(time.Now().Unix()),
@@ -195,6 +218,7 @@ func (t *Transactions) canonicalBytes() []byte {
 	writeField(&buf, t.SenderPubKey)
 	writeField(&buf, t.RecipientHash)
 	writeField(&buf, t.Nonce)
+	writeField(&buf, t.CampaignID)
 	_ = binary.Write(&buf, binary.BigEndian, t.Value)
 	_ = binary.Write(&buf, binary.BigEndian, t.Timestamp)
 	return buf.Bytes()
