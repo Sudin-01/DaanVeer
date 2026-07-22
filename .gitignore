@@ -22,3 +22,9 @@ experiments/.testbed/
 daanveer
 
 test.txt
+
+# Research materials -- kept local until publication.
+# docs/README.md is the public project README and stays tracked.
+docs/RESEARCH_PLAN.md
+docs/RELATED_WORK.md
+docs/paper/
