@@ -92,8 +92,14 @@ func (chain *BlockChain) validateBlock(blk *Block, parent *Block) error {
 			return err
 		}
 	}
-	if err := blk.VerifyQuorum(); err != nil {
-		return err
+	// Quorum is counted excluding validators this node has caught
+	// equivocating, so a Byzantine validator cannot help finalise a block.
+	required := QuorumSize()
+	if required == 0 {
+		return errors.New("validator set is empty")
+	}
+	if got := chain.activeAttestations(blk); got < required {
+		return fmt.Errorf("insufficient attestations: %d of %d required", got, required)
 	}
 	if err := blk.VerifyTransactions(); err != nil {
 		return err
@@ -166,6 +172,28 @@ func (chain *BlockChain) AcceptBlock(blk *Block) (AcceptStatus, error) {
 	}
 	if chain.HasBlock(blk.BlockHash) {
 		return StatusDuplicate, nil
+	}
+
+	// Refuse anything from a validator already caught equivocating, before
+	// spending verification effort on it.
+	proposer := string(blk.ValidatorAddress)
+	if chain.IsEvicted(proposer) {
+		return StatusOrphan, fmt.Errorf("block rejected: %s", chain.DescribeEviction(proposer))
+	}
+
+	// Record the proposal. A validator signing a second, different block at a
+	// height it has already proposed at is provably Byzantine: the two
+	// signatures are self-contained evidence. Only record once the block is
+	// known to be genuinely signed by its stated proposer, otherwise anyone
+	// could evict a validator by forging a conflicting header.
+	if blk.VerifyBlockHash() && blk.VerifyProof() {
+		evidence, err := chain.RecordProposal(proposer, blk.Height, blk.BlockHash)
+		if err != nil {
+			return StatusOrphan, err
+		}
+		if evidence != nil {
+			return StatusOrphan, evidence
+		}
 	}
 
 	// Fast path: the block extends the current tip.

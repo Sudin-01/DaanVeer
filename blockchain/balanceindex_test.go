@@ -69,8 +69,7 @@ func TestIndexMatchesScanOnExtension(t *testing.T) {
 // A reorganisation must revert the effect of disconnected blocks.
 func TestIndexSurvivesReorg(t *testing.T) {
 	chain := newTestChain(t)
-	validator := newTestWallet(t)
-	authorize(t, validator)
+	validator, rival := authorizeRivals(t)
 
 	donor := newTestWallet(t)
 	fundWallet(t, chain, donor, 10000)
@@ -92,12 +91,9 @@ func TestIndexSurvivesReorg(t *testing.T) {
 	}
 	assertAgrees(t, chain, tracked)
 
-	// Branch B is longer and does not contain that payment.
-	blockB1 := buildBlock(t, base, validator, nil)
-	if string(blockB1.BlockHash) == string(blockA.BlockHash) {
-		t.Skip("competing blocks collided")
-	}
-	blockB2 := buildBlock(t, blockB1, validator, nil)
+	// Branch B is longer, omits that payment, and comes from the rival.
+	blockB1 := buildBlock(t, base, rival, nil)
+	blockB2 := buildBlock(t, blockB1, rival, nil)
 
 	if _, err := chain.AcceptBlock(blockB1); err != nil {
 		t.Fatalf("accept B1: %v", err)

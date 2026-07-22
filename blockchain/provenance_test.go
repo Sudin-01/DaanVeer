@@ -198,8 +198,7 @@ func TestC3_AccountProvenanceMatchesBalance(t *testing.T) {
 // must stop being attributed.
 func TestC3_ProvenanceRevertedOnReorg(t *testing.T) {
 	chain := newTestChain(t)
-	validator := newTestWallet(t)
-	authorize(t, validator)
+	validator, rival := authorizeRivals(t)
 
 	donor, charity := newTestWallet(t), newTestWallet(t)
 	fundWallet(t, chain, donor, 10000)
@@ -217,12 +216,9 @@ func TestC3_ProvenanceRevertedOnReorg(t *testing.T) {
 		t.Fatalf("campaign total = %d on branch A, want 500", total)
 	}
 
-	// A longer branch without the donation.
-	blockB1 := buildBlock(t, base, validator, nil)
-	if bytes.Equal(blockB1.BlockHash, blockA.BlockHash) {
-		t.Skip("competing blocks collided")
-	}
-	blockB2 := buildBlock(t, blockB1, validator, nil)
+	// A longer branch without the donation, from the rival proposer.
+	blockB1 := buildBlock(t, base, rival, nil)
+	blockB2 := buildBlock(t, blockB1, rival, nil)
 	if _, err := chain.AcceptBlock(blockB1); err != nil {
 		t.Fatalf("accept B1: %v", err)
 	}

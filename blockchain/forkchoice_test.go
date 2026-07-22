@@ -12,7 +12,6 @@ import (
 	"bytes"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/Sudin-01/DaanVeer/wallet"
 )
@@ -88,8 +87,7 @@ func TestForkChoice_DuplicateIgnored(t *testing.T) {
 // A competing block at the same height must be stored without moving the tip.
 func TestForkChoice_SideBranchDoesNotMoveTip(t *testing.T) {
 	chain := newTestChain(t)
-	validator := newTestWallet(t)
-	authorize(t, validator)
+	validator, rival := authorizeRivals(t)
 
 	genesis := tipOf(t, chain)
 
@@ -98,9 +96,8 @@ func TestForkChoice_SideBranchDoesNotMoveTip(t *testing.T) {
 		t.Fatalf("accept A: %v", err)
 	}
 
-	// A competing block at the same height, distinguished by its timestamp.
-	time.Sleep(1100 * time.Millisecond)
-	blockB := buildBlock(t, genesis, validator, nil)
+	// A competing block at the same height, from a different proposer.
+	blockB := buildBlock(t, genesis, rival, nil)
 	if bytes.Equal(blockA.BlockHash, blockB.BlockHash) {
 		t.Skip("competing blocks collided; timestamp resolution too coarse")
 	}
@@ -124,8 +121,7 @@ func TestForkChoice_SideBranchDoesNotMoveTip(t *testing.T) {
 // The chain must switch to a strictly longer branch.
 func TestForkChoice_ReorgToLongerBranch(t *testing.T) {
 	chain := newTestChain(t)
-	validator := newTestWallet(t)
-	authorize(t, validator)
+	validator, rival := authorizeRivals(t)
 
 	genesis := tipOf(t, chain)
 
@@ -135,13 +131,9 @@ func TestForkChoice_ReorgToLongerBranch(t *testing.T) {
 		t.Fatalf("accept A1: %v", err)
 	}
 
-	// Branch B: two blocks from genesis, built offline.
-	time.Sleep(1100 * time.Millisecond)
-	blockB1 := buildBlock(t, genesis, validator, nil)
-	if bytes.Equal(blockA1.BlockHash, blockB1.BlockHash) {
-		t.Skip("competing blocks collided; timestamp resolution too coarse")
-	}
-	blockB2 := buildBlock(t, blockB1, validator, nil)
+	// Branch B: two blocks from genesis, built offline by the rival proposer.
+	blockB1 := buildBlock(t, genesis, rival, nil)
+	blockB2 := buildBlock(t, blockB1, rival, nil)
 
 	if status, err := chain.AcceptBlock(blockB1); err != nil {
 		t.Fatalf("accept B1: %v", err)
@@ -246,8 +238,7 @@ func TestForkChoice_RejectsHeightMismatch(t *testing.T) {
 // not lost when the chain reorganises.
 func TestForkChoice_ReorgRestoresTransactions(t *testing.T) {
 	chain := newTestChain(t)
-	validator := newTestWallet(t)
-	authorize(t, validator)
+	validator, rival := authorizeRivals(t)
 
 	donor, charity := newTestWallet(t), newTestWallet(t)
 	fundWallet(t, chain, donor, 1000)
@@ -264,13 +255,9 @@ func TestForkChoice_ReorgRestoresTransactions(t *testing.T) {
 		t.Fatalf("mempool should be empty after mining, has %d", chain.Mempool.Len())
 	}
 
-	// Branch B is longer and does not carry it.
-	time.Sleep(1100 * time.Millisecond)
-	blockB1 := buildBlock(t, genesis, validator, nil)
-	if bytes.Equal(blockA1.BlockHash, blockB1.BlockHash) {
-		t.Skip("competing blocks collided; timestamp resolution too coarse")
-	}
-	blockB2 := buildBlock(t, blockB1, validator, nil)
+	// Branch B is longer, does not carry it, and comes from the rival.
+	blockB1 := buildBlock(t, genesis, rival, nil)
+	blockB2 := buildBlock(t, blockB1, rival, nil)
 
 	if _, err := chain.AcceptBlock(blockB1); err != nil {
 		t.Fatalf("accept B1: %v", err)

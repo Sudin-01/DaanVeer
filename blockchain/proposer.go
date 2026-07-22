@@ -111,8 +111,24 @@ func (blk *Block) Attest(w *wallet.Wallet) error {
 	return nil
 }
 
+// verifyAttestationSignature checks one attestation against a block hash.
+func verifyAttestationSignature(validator Validator, attestation Attestation, hash []byte) bool {
+	raw, err := hex.DecodeString(attestation.Signature)
+	if err != nil || len(raw) != 64 {
+		return false
+	}
+	r := new(big.Int).SetBytes(raw[:32])
+	s := new(big.Int).SetBytes(raw[32:])
+	return ecdsa.Verify(validator.PublicKey, hash, r, s)
+}
+
 // CountAttestations returns the number of distinct, valid attestations from
 // authorised validators, counting the proposer's own signature.
+//
+// This counts signatures without reference to eviction, because a Block has no
+// access to chain state. Quorum decisions use the chain-aware
+// activeAttestations, which additionally excludes validators caught
+// equivocating.
 func (blk *Block) CountAttestations() int {
 	hash := blk.Hash()
 	counted := map[string]bool{}
@@ -131,13 +147,7 @@ func (blk *Block) CountAttestations() int {
 		if !authorized {
 			continue
 		}
-		raw, err := hex.DecodeString(attestation.Signature)
-		if err != nil || len(raw) != 64 {
-			continue
-		}
-		r := new(big.Int).SetBytes(raw[:32])
-		s := new(big.Int).SetBytes(raw[32:])
-		if ecdsa.Verify(validator.PublicKey, hash, r, s) {
+		if verifyAttestationSignature(validator, attestation, hash) {
 			counted[address] = true
 		}
 	}

@@ -112,6 +112,38 @@ func authorize(t *testing.T, wallets ...*wallet.Wallet) {
 	t.Cleanup(func() { SetValidators(nil) })
 }
 
+// authorizeRivals installs two validators with a quorum of one, so each can
+// commit a block alone.
+//
+// Fork tests need two distinct proposers. A single validator signing two
+// different blocks at the same height is not a fork -- it is equivocation, and
+// the chain now rejects it (see equivocation.go). Modelling a fork with one
+// validator was therefore both unrealistic and, once detection existed,
+// self-contradictory.
+func authorizeRivals(t *testing.T) (*wallet.Wallet, *wallet.Wallet) {
+	t.Helper()
+	first, second := newTestWallet(t), newTestWallet(t)
+
+	cfg, err := ActiveConfig()
+	if err != nil {
+		t.Fatalf("active config: %v", err)
+	}
+	next := *cfg
+	next.Quorum = 1
+	next.RequireSchedule = false
+	next.Validators = nil
+	for _, w := range []*wallet.Wallet{first, second} {
+		if err := next.AddValidator(w.PublicKey); err != nil {
+			t.Fatalf("add validator: %v", err)
+		}
+	}
+	if err := SetConfig(&next); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+	t.Cleanup(func() { SetValidators(nil) })
+	return first, second
+}
+
 // signBlockAs is the attacker's forging routine: exactly what ProofOfAuthority
 // does, but for an arbitrary wallet.
 func signBlockAs(t *testing.T, blk *Block, w *wallet.Wallet) {
